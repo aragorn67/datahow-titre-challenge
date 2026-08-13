@@ -1,0 +1,58 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "titre-predictor"
+version = "0.1.0"
+description = "Final mAb titre prediction for a simulated CHO fed-batch bioprocess"
+requires-python = ">=3.11"
+
+# Part 1 only. The inference-service dependencies (fastapi, pydantic, uvicorn,
+# httpx) are deliberately NOT declared yet -- they are added in Part 2 so that
+# the modelling package can be installed and tested without a web stack.
+dependencies = [
+    "numpy>=1.24",
+    "pandas>=1.5",
+    "scipy>=1.10",     # least_squares for the coefficient fit
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4",
+    "ruff>=0.4",
+    "mypy>=1.8",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "tests", "scripts"]
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle errors
+    "F",    # pyflakes
+    "I",    # import sorting
+    "UP",   # pyupgrade
+    "B",    # bugbear
+    "SIM",  # simplify
+    "RUF",
+]
+
+[tool.mypy]
+python_version = "3.11"
+packages = ["titre_predictor"]
+mypy_path = "src"
+strict = true
+# pandas and scipy ship incomplete stubs; do not fail on their internals.
+[[tool.mypy.overrides]]
+module = ["pandas.*", "scipy.*"]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
