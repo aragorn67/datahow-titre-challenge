@@ -12,7 +12,7 @@ requires-python = ">=3.11"
 # httpx) are deliberately NOT declared yet -- they are added in Part 2 so that
 # the modelling package can be installed and tested without a web stack.
 dependencies = [
-    "numpy>=1.24",
+    "numpy>=2.0",         # np.trapezoid; np.trapz was removed in 2.0
     "pandas>=1.5",
     "scipy>=1.10",       # least_squares for the coefficient fit
     "matplotlib>=3.7",   # diagnostic plots
