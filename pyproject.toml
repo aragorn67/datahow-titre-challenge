@@ -14,7 +14,8 @@ requires-python = ">=3.11"
 dependencies = [
     "numpy>=1.24",
     "pandas>=1.5",
-    "scipy>=1.10",     # least_squares for the coefficient fit
+    "scipy>=1.10",       # least_squares for the coefficient fit
+    "matplotlib>=3.7",   # diagnostic plots
 ]
 
 [project.optional-dependencies]
@@ -44,7 +45,9 @@ select = [
 ]
 
 [tool.mypy]
-python_version = "3.11"
+# Deliberately not pinned to a python_version: mypy then checks against the
+# interpreter in use. Pinning it to 3.11 makes mypy parse numpy's stubs under 3.11
+# rules, and numpy >= 2.5 ships stubs using `type` statements that need 3.12+.
 packages = ["titre_predictor"]
 mypy_path = "src"
 strict = true
