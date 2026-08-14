@@ -30,6 +30,11 @@ TARGET_PREFIX = "Y:"
 
 TARGET_COLUMN = "Y:Titer"
 
+# --- Design scalars set once per run and never varied in time ----------------------
+
+DESIGN_DISSOLVED_OXYGEN = "Z:DO"
+DESIGN_STIRRING = "Z:Stir"
+
 # --- Design scalars used when reconstructing the control profiles ------------------
 
 DESIGN_FEED_START = "Z:FeedStart"

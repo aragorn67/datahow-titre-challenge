@@ -21,6 +21,10 @@ htmlcov/
 # Cached intermediate results (regenerable; see scripts/)
 cache/
 
+# Working notes -- deliberately local, not part of the submission
+IDEAS.md
+docs/implementation-plan.md
+
 # Editor / OS
 .vscode/
 .idea/
