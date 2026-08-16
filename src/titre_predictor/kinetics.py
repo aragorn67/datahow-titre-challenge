@@ -282,6 +282,18 @@ def _ph_response(
 # magnitude beyond the observed range at the top, so that "this inhibitor does nothing" is
 # inside the grid: the fit must be able to switch a mechanism off rather than be obliged to
 # find an effect. The lower ends sit below the smallest non-zero concentration observed.
+#
+# The exponential sensitivities span +/-6, widened from +/-3 on evidence: theta_pH fitted
+# hard against the narrower bound and only settled, at about 4.28, once it was widened.
+#
+# A SEARCH range and a PROFILE range are different requirements and are kept apart. This one
+# must contain the optimum and be resolvable by the grid; widening it further coarsens the
+# first sweep and measurably degrades the fit (cross-validated RMSE 440 -> 462 at +/-12).
+# A profile range must instead contain the whole confidence interval, whose upper bound here
+# is 6.19, so profile_likelihood() takes its own range rather than inheriting this one.
+#
+# A parameter resting on its bound is not an estimate. FitDiagnostics reports any that do
+# rather than leaving it to be noticed by eye.
 MECHANISMS: dict[str, Mechanism] = {
     "glucose_limitation": Mechanism(
         name="glucose_limitation",
@@ -319,14 +331,14 @@ MECHANISMS: dict[str, Mechanism] = {
         name="temperature_response",
         description="Monotone temperature response about the reference",
         required_series=(schema.CONTROL_TEMPERATURE,),
-        parameters=(ParameterSpec("theta_T", "per degC", -2.0, 2.0, logarithmic=False),),
+        parameters=(ParameterSpec("theta_T", "per degC", -6.0, 6.0, logarithmic=False),),
         evaluate=_temperature_response,
     ),
     "ph_response": Mechanism(
         name="ph_response",
         description="Monotone pH response about the reference",
         required_series=(schema.CONTROL_PH,),
-        parameters=(ParameterSpec("theta_pH", "per pH unit", -3.0, 3.0, logarithmic=False),),
+        parameters=(ParameterSpec("theta_pH", "per pH unit", -6.0, 6.0, logarithmic=False),),
         evaluate=_ph_response,
     ),
 }

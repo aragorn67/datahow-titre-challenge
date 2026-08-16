@@ -1,0 +1,30 @@
+{
+  "variant": "M2",
+  "alpha": 16.61599085647233,
+  "beta": 14.049561476007018,
+  "lysis_rate_constant": 0.004946931964238205,
+  "mechanisms": [
+    "glutamine_limitation",
+    "glucose_limitation"
+  ],
+  "mechanism_parameters": [
+    0.021845172011711232,
+    1.0045073642544626
+  ],
+  "loss": "absolute",
+  "ridge_penalty": 0.0,
+  "provenance": {
+    "created_at": "2026-08-16T14:39:57+00:00",
+    "training_data_sha256": "09b9cf2c07b09fd83515ec9a140dd6232ff4c66b8a7363e6668ce5025681e976",
+    "training_targets_sha256": "d4a5d9577867fe5db524e0c0610b606ed5043301d364877ef9c8366fe7d67a1c",
+    "training_run_count": 100,
+    "random_seed": 0,
+    "fold_count": 10,
+    "python": "3.13.14",
+    "package_versions": {
+      "numpy": "2.5.2",
+      "scipy": "1.18.0",
+      "scikit-learn": "1.9.0"
+    }
+  }
+}

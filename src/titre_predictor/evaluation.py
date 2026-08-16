@@ -23,7 +23,8 @@ was trained on and report a number that says nothing about the real task.
 ``split_by_duration`` reproduces the shift instead.
 """
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
+from typing import Protocol
 
 import numpy as np
 from numpy.typing import NDArray
@@ -31,6 +32,17 @@ from numpy.typing import NDArray
 from titre_predictor import features
 from titre_predictor.data import schema
 from titre_predictor.domain import ExperimentRun
+
+
+class PredictsTitre(Protocol):
+    """Anything that can predict titres for a list of runs.
+
+    Kept structural rather than a base class so the mechanistic model and the mean baseline
+    both satisfy it without either importing this module.
+    """
+
+    def predict_many(self, runs: Sequence[ExperimentRun]) -> NDArray[np.float64]: ...
+
 
 # Runs longer than this are held out by split_by_duration.
 DEFAULT_MAXIMUM_TRAINING_DURATION_DAYS = 10.0  # 7 | 8 | 9 | 10
@@ -218,3 +230,125 @@ def k_fold_indices(
         )
         for held_out in range(fold_count)
     ]
+
+
+def cross_validated_predictions(
+    runs: Sequence[ExperimentRun],
+    targets: dict[str, float],
+    fit_function: Callable[[Sequence[ExperimentRun], dict[str, float]], PredictsTitre],
+    fold_count: int = 10,  # 5 | 10 | len(runs) (leave-one-out)
+    random_seed: int = 0,
+) -> NDArray[np.float64]:
+    """Out-of-fold predictions for every run, each from a model that never saw it.
+
+    **This is the selection instrument**, and it runs over all 100 training runs rather than
+    over a duration-restricted subset. Two reasons:
+
+    * *It matches deployment.* The shipped model is fitted on all 100 runs, 14-day ones
+      included, and asked to predict 20 new 14-day runs. Ten-fold cross-validation over 100
+      reproduces exactly that. The leave-duration-out split does not: it withholds the target
+      duration from training, which is a harder task than the one actually faced.
+    * *It is far less noisy.* The estimate pools 100 predictions rather than 10. On ten runs
+      a bootstrapped 90% interval for RMSE spans roughly 800, wide enough to swallow every
+      difference between the model variants -- so the ten held-out runs cannot rank models
+      however carefully they are used.
+
+    **The limitation, stated rather than hidden:** the folds mix durations while the real
+    test set is purely 14-day, so this measures average performance across durations, not
+    performance at the target horizon. Isolating the 14-day runs returns to ten points and
+    their noise, so there is no way around it with this data. Selecting here assumes a
+    mechanism that helps on 7-10 day runs also helps on 14-day ones -- reasonable, and
+    untestable at this sample size.
+
+    Every parameter is refitted inside each fold, ``kl`` and any ridge strength included.
+    Reusing a value fitted on all the data would leak the held-out runs into every fold.
+
+    Args:
+        runs: all available experiments.
+        targets: measured final titre per experiment identifier.
+        fit_function: builds a fitted model from a training subset. Called once per fold.
+        fold_count: number of folds.
+        random_seed: fixed so folds are reproducible.
+
+    Returns:
+        One out-of-fold prediction per run, aligned to ``runs``.
+    """
+    predictions = np.full(len(runs), np.nan, dtype=np.float64)
+    for train_indices, test_indices in k_fold_indices(len(runs), fold_count, random_seed):
+        fitted = fit_function([runs[index] for index in train_indices], targets)
+        held_out = [runs[index] for index in test_indices]
+        predictions[test_indices] = fitted.predict_many(held_out)
+    return predictions
+
+
+def bootstrap_metric(
+    actual: Sequence[float] | NDArray[np.float64],
+    predicted: Sequence[float] | NDArray[np.float64],
+    metric: Callable[[NDArray[np.float64], NDArray[np.float64]], float] = root_mean_squared_error,
+    resamples: int = 2000,
+    confidence: float = 0.90,
+    random_seed: int = 0,
+) -> tuple[float, float, float]:
+    """A metric with a bootstrap interval, by resampling runs with replacement.
+
+    A point estimate from a small set invites over-reading. On ten runs the interval is wide
+    enough that most model differences sit inside it, which is itself the finding.
+
+    Returns:
+        ``(point_estimate, lower, upper)``.
+    """
+    actual_array, predicted_array = _as_paired_arrays(actual, predicted)
+    generator = np.random.default_rng(random_seed)
+    sample_count = actual_array.size
+    scores = np.empty(resamples, dtype=np.float64)
+    for index in range(resamples):
+        draw = generator.integers(0, sample_count, sample_count)
+        scores[index] = metric(actual_array[draw], predicted_array[draw])
+    tail = (1.0 - confidence) / 2.0
+    return (
+        float(metric(actual_array, predicted_array)),
+        float(np.quantile(scores, tail)),
+        float(np.quantile(scores, 1.0 - tail)),
+    )
+
+
+def paired_bootstrap(
+    actual: Sequence[float] | NDArray[np.float64],
+    first_predicted: Sequence[float] | NDArray[np.float64],
+    second_predicted: Sequence[float] | NDArray[np.float64],
+    metric: Callable[[NDArray[np.float64], NDArray[np.float64]], float] = root_mean_squared_error,
+    resamples: int = 2000,
+    confidence: float = 0.90,
+    random_seed: int = 0,
+) -> tuple[float, float, float, float]:
+    """How reliably one model beats another, comparing them on the **same** resampled runs.
+
+    Pairing is what makes a small held-out set usable at all. Run-to-run variation -- some
+    experiments are simply harder to predict -- moves both models together and cancels in
+    the difference, so a paired comparison can be conclusive where two separate intervals
+    overlap almost entirely.
+
+    Lower ``metric`` is assumed better, as it is for every metric in this module.
+
+    Returns:
+        ``(difference, lower, upper, fraction_first_better)`` where ``difference`` is
+        ``second - first``, so a positive value means the first model is better.
+    """
+    actual_array, first_array = _as_paired_arrays(actual, first_predicted)
+    _actual_again, second_array = _as_paired_arrays(actual, second_predicted)
+
+    generator = np.random.default_rng(random_seed)
+    sample_count = actual_array.size
+    differences = np.empty(resamples, dtype=np.float64)
+    for index in range(resamples):
+        draw = generator.integers(0, sample_count, sample_count)
+        differences[index] = metric(actual_array[draw], second_array[draw]) - metric(
+            actual_array[draw], first_array[draw]
+        )
+    tail = (1.0 - confidence) / 2.0
+    return (
+        float(metric(actual_array, second_array) - metric(actual_array, first_array)),
+        float(np.quantile(differences, tail)),
+        float(np.quantile(differences, 1.0 - tail)),
+        float(np.mean(differences > 0.0)),
+    )

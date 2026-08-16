@@ -1,0 +1,747 @@
+{
+  "provenance": {
+    "created_at": "2026-08-16T14:39:57+00:00",
+    "training_data_sha256": "09b9cf2c07b09fd83515ec9a140dd6232ff4c66b8a7363e6668ce5025681e976",
+    "training_targets_sha256": "d4a5d9577867fe5db524e0c0610b606ed5043301d364877ef9c8366fe7d67a1c",
+    "training_run_count": 100,
+    "random_seed": 0,
+    "fold_count": 10,
+    "python": "3.13.14",
+    "package_versions": {
+      "numpy": "2.5.2",
+      "scipy": "1.18.0",
+      "scikit-learn": "1.9.0"
+    }
+  },
+  "selection_protocol": {
+    "selection_run_count": 90,
+    "held_out_run_count": 10,
+    "note": "mechanisms, variant and ridge strength are all selected on the short runs"
+  },
+  "screening": {
+    "primary_survivors": [
+      "exposure_Lac",
+      "growth_rate_peak",
+      "exposure_pH",
+      "exposure_pH_early",
+      "exposure_Gln_early"
+    ],
+    "primary_frequencies": {
+      "exposure_Glc": {
+        "correlation": 1.0,
+        "elastic_net": 0.0,
+        "pls": 0.3,
+        "permutation": 0.0
+      },
+      "exposure_Glc_early": {
+        "correlation": 0.4,
+        "elastic_net": 0.0,
+        "pls": 0.0,
+        "permutation": 0.0
+      },
+      "exposure_Gln": {
+        "correlation": 1.0,
+        "elastic_net": 0.0,
+        "pls": 0.0,
+        "permutation": 0.0
+      },
+      "exposure_Gln_early": {
+        "correlation": 1.0,
+        "elastic_net": 0.0,
+        "pls": 0.8,
+        "permutation": 0.1
+      },
+      "exposure_Lac": {
+        "correlation": 1.0,
+        "elastic_net": 1.0,
+        "pls": 1.0,
+        "permutation": 1.0
+      },
+      "exposure_Lac_early": {
+        "correlation": 0.0,
+        "elastic_net": 0.0,
+        "pls": 1.0,
+        "permutation": 0.0
+      },
+      "exposure_Amm": {
+        "correlation": 0.0,
+        "elastic_net": 0.7,
+        "pls": 0.1,
+        "permutation": 0.4
+      },
+      "exposure_Amm_early": {
+        "correlation": 0.0,
+        "elastic_net": 0.0,
+        "pls": 0.0,
+        "permutation": 0.0
+      },
+      "exposure_Lysed": {
+        "correlation": 0.0,
+        "elastic_net": 0.0,
+        "pls": 0.0,
+        "permutation": 0.0
+      },
+      "exposure_Lysed_early": {
+        "correlation": 0.0,
+        "elastic_net": 0.0,
+        "pls": 0.0,
+        "permutation": 0.0
+      },
+      "exposure_temp": {
+        "correlation": 0.0,
+        "elastic_net": 0.0,
+        "pls": 0.0,
+        "permutation": 0.3
+      },
+      "exposure_temp_early": {
+        "correlation": 0.0,
+        "elastic_net": 0.0,
+        "pls": 0.0,
+        "permutation": 0.0
+      },
+      "exposure_pH": {
+        "correlation": 0.0,
+        "elastic_net": 1.0,
+        "pls": 0.0,
+        "permutation": 1.0
+      },
+      "exposure_pH_early": {
+        "correlation": 0.0,
+        "elastic_net": 1.0,
+        "pls": 0.0,
+        "permutation": 1.0
+      },
+      "growth_rate_mean": {
+        "correlation": 0.0,
+        "elastic_net": 0.3,
+        "pls": 0.1,
+        "permutation": 0.5
+      },
+      "growth_rate_peak": {
+        "correlation": 0.0,
+        "elastic_net": 1.0,
+        "pls": 1.0,
+        "permutation": 0.7
+      },
+      "cell_days": {
+        "correlation": 0.0,
+        "elastic_net": 0.0,
+        "pls": 0.3,
+        "permutation": 0.0
+      },
+      "peak_viable_density": {
+        "correlation": 0.6,
+        "elastic_net": 0.0,
+        "pls": 0.0,
+        "permutation": 0.0
+      },
+      "vcd_at_FeedStart": {
+        "correlation": 0.0,
+        "elastic_net": 0.0,
+        "pls": 0.3,
+        "permutation": 0.0
+      },
+      "DO": {
+        "correlation": 0.0,
+        "elastic_net": 0.0,
+        "pls": 0.1,
+        "permutation": 0.0
+      },
+      "Stir": {
+        "correlation": 0.0,
+        "elastic_net": 0.0,
+        "pls": 0.0,
+        "permutation": 0.0
+      },
+      "FeedRateGlc": {
+        "correlation": 0.0,
+        "elastic_net": 0.0,
+        "pls": 0.0,
+        "permutation": 0.0
+      },
+      "FeedRateGln": {
+        "correlation": 0.0,
+        "elastic_net": 0.0,
+        "pls": 0.0,
+        "permutation": 0.0
+      },
+      "feed_window_days": {
+        "correlation": 0.0,
+        "elastic_net": 0.0,
+        "pls": 0.0,
+        "permutation": 0.0
+      },
+      "duration_days": {
+        "correlation": 0.0,
+        "elastic_net": 0.0,
+        "pls": 0.0,
+        "permutation": 0.0
+      }
+    },
+    "conditional_features": [
+      "exposure_Glc_late",
+      "exposure_Gln_late",
+      "exposure_Lac_late",
+      "exposure_Amm_late",
+      "exposure_Lysed_late",
+      "exposure_temp_late",
+      "exposure_pH_late",
+      "vcd_at_tempShift",
+      "vcd_at_phShift",
+      "vcd_at_FeedEnd"
+    ],
+    "would_have_licensed": [
+      "metabolic_burden",
+      "ph_response",
+      "glutamine_limitation"
+    ],
+    "conditional_survivors": [
+      "exposure_Amm_late",
+      "exposure_Lac_late",
+      "exposure_Glc_late",
+      "exposure_temp_late",
+      "exposure_Gln_late",
+      "exposure_pH_late",
+      "exposure_Lysed_late"
+    ]
+  },
+  "mechanism_selection": {
+    "chosen": [
+      "glutamine_limitation",
+      "glucose_limitation"
+    ],
+    "baseline_score": 293.9219730708818,
+    "improvement": 119.82438471303368,
+    "trials": [
+      [
+        [],
+        293.9219730708818
+      ],
+      [
+        [
+          "glucose_limitation"
+        ],
+        234.52639649575482
+      ],
+      [
+        [
+          "glutamine_limitation"
+        ],
+        228.6868002321025
+      ],
+      [
+        [
+          "lysate_inhibition"
+        ],
+        302.6136418170713
+      ],
+      [
+        [
+          "metabolic_burden"
+        ],
+        294.05022195450414
+      ],
+      [
+        [
+          "ph_response"
+        ],
+        298.94633476757275
+      ],
+      [
+        [
+          "temperature_response"
+        ],
+        291.39834634596895
+      ],
+      [
+        [
+          "glutamine_limitation",
+          "glucose_limitation"
+        ],
+        174.0975883578481
+      ],
+      [
+        [
+          "glutamine_limitation",
+          "lysate_inhibition"
+        ],
+        242.2671602243871
+      ],
+      [
+        [
+          "glutamine_limitation",
+          "metabolic_burden"
+        ],
+        236.53628796240505
+      ],
+      [
+        [
+          "glutamine_limitation",
+          "ph_response"
+        ],
+        234.6859754804201
+      ],
+      [
+        [
+          "glutamine_limitation",
+          "temperature_response"
+        ],
+        231.7251852163905
+      ],
+      [
+        [
+          "glutamine_limitation",
+          "glucose_limitation",
+          "lysate_inhibition"
+        ],
+        175.46949686874189
+      ],
+      [
+        [
+          "glutamine_limitation",
+          "glucose_limitation",
+          "metabolic_burden"
+        ],
+        168.9103018904267
+      ],
+      [
+        [
+          "glutamine_limitation",
+          "glucose_limitation",
+          "ph_response"
+        ],
+        176.6208213511179
+      ],
+      [
+        [
+          "glutamine_limitation",
+          "glucose_limitation",
+          "temperature_response"
+        ],
+        173.6179024856955
+      ]
+    ],
+    "single_mechanism_scores": {
+      "glucose_limitation": 234.52639649575482,
+      "glutamine_limitation": 228.6868002321025,
+      "lysate_inhibition": 302.6136418170713,
+      "metabolic_burden": 294.05022195450414,
+      "ph_response": 298.94633476757275,
+      "temperature_response": 291.39834634596895
+    },
+    "rejected_for_identifiability": [
+      {
+        "mechanisms": [
+          "glutamine_limitation",
+          "glucose_limitation",
+          "metabolic_burden"
+        ],
+        "cross_validated_rmse": 168.9103018904267,
+        "would_have_improved_on_chosen": true,
+        "unidentified_constants": [
+          "K_L"
+        ],
+        "constant_spread": {
+          "K_Q": 1.903447994460037,
+          "K_G": 2.076743273621124,
+          "K_L": 8.981919132347299,
+          "K_A": 3.219678444251379
+        },
+        "fraction_of_folds_on_a_bound": {
+          "K_Q": 0.0,
+          "K_G": 0.0,
+          "K_L": 0.3,
+          "K_A": 0.0
+        },
+        "reason": "K_L moves 8.98x across folds, on a bound in 30% of them"
+      }
+    ]
+  },
+  "variant_selection": {
+    "scores": {
+      "M0": 365.77375518671255,
+      "M1": 293.9219730708818,
+      "M2": 174.0975883578481,
+      "M3": 303.13512130615635
+    },
+    "selected": "M2",
+    "lowest_scoring": "M2",
+    "minimum_relative_improvement": 0.01
+  },
+  "ridge": {
+    "scores": {
+      "0.0": 174.0975883578481,
+      "0.0001": 174.09331944000863,
+      "0.001": 173.954858960332,
+      "0.01": 173.77946051439585,
+      "0.1": 183.09377378335714,
+      "1.0": 478.0588488915209
+    },
+    "selected": 0.0,
+    "lowest_scoring": 0.01,
+    "minimum_relative_improvement": 0.01
+  },
+  "cross_validation": {
+    "mean baseline": {
+      "rmse": 757.4311334522428,
+      "rmse_interval": [
+        594.9236372065089,
+        913.3370429384369
+      ],
+      "mape": 54.70712646905687,
+      "beats_baseline_fraction": null
+    },
+    "M0": {
+      "rmse": 759.6872676723985,
+      "rmse_interval": [
+        554.9746837468012,
+        945.6708866172015
+      ],
+      "mape": 36.27179706619013,
+      "beats_baseline_fraction": 0.5375
+    },
+    "M1": {
+      "rmse": 577.6286350851834,
+      "rmse_interval": [
+        406.02134817466526,
+        729.1254625160561
+      ],
+      "mape": 26.824638721329592,
+      "beats_baseline_fraction": 0.979
+    },
+    "M2": {
+      "rmse": 286.5667972516847,
+      "rmse_interval": [
+        214.16781860749674,
+        355.56052916755175
+      ],
+      "mape": 14.633408443694771,
+      "beats_baseline_fraction": 1.0
+    },
+    "M3": {
+      "rmse": 330.7941069516666,
+      "rmse_interval": [
+        264.095230228921,
+        389.75533886580524
+      ],
+      "mape": 17.955337763629803,
+      "beats_baseline_fraction": 1.0
+    },
+    "PLS": {
+      "rmse": 352.8426468274837,
+      "rmse_interval": [
+        261.0208658972313,
+        450.7472490925984
+      ],
+      "mape": 22.572024127194517,
+      "beats_baseline_fraction": 1.0
+    },
+    "gradient boosting": {
+      "rmse": 366.837681229974,
+      "rmse_interval": [
+        282.8644378267449,
+        448.4216644625364
+      ],
+      "mape": 17.33273665963708,
+      "beats_baseline_fraction": 1.0
+    }
+  },
+  "paired_comparisons": {
+    "M2_vs_M1": {
+      "difference": 291.0618378334987,
+      "interval": [
+        153.9338194870218,
+        413.542567432965
+      ],
+      "fraction_better": 1.0,
+      "distinguishable": true
+    },
+    "M3_vs_M2": {
+      "difference": -44.2273096999819,
+      "interval": [
+        -94.270531267307,
+        8.839057624575785
+      ],
+      "fraction_better": 0.086,
+      "distinguishable": false
+    },
+    "M3_vs_M1": {
+      "difference": 246.8345281335168,
+      "interval": [
+        83.47726549371937,
+        394.6657189560437
+      ],
+      "fraction_better": 0.993,
+      "distinguishable": true
+    },
+    "M1_vs_M0": {
+      "difference": 182.05863258721513,
+      "interval": [
+        109.35868481335581,
+        253.984617425623
+      ],
+      "fraction_better": 1.0,
+      "distinguishable": true
+    },
+    "M2_vs_PLS": {
+      "difference": 66.27584957579899,
+      "interval": [
+        -6.923327779000601,
+        131.60386345424402
+      ],
+      "fraction_better": 0.929,
+      "distinguishable": false
+    },
+    "M2_vs_gradient boosting": {
+      "difference": 80.2708839782893,
+      "interval": [
+        25.46110432335203,
+        131.08362844372544
+      ],
+      "fraction_better": 0.9935,
+      "distinguishable": true
+    }
+  },
+  "selected_model": {
+    "variant": "M2",
+    "ridge_penalty": 0.0,
+    "rate_law": "qP(t) = 16.62 * mu_eff(t) + 14.05 * F(z(t))\n\nF(z) = glutamine_limitation * glucose_limitation\n    glutamine_limitation: Monod limitation by glutamine\n    glucose_limitation: Monod limitation by glucose\n\nFitted constants\n    alpha    =        16.62   titre per cell synthesised\n    beta     =        14.05   titre per cell-day\n    kl       =     0.004947   1/day\n    K_Q      =      0.02185   mM\n    K_G      =        1.005   mM",
+    "coefficient_correlation": -0.8745593673132168,
+    "pinned_parameters": [],
+    "shape_constants": {
+      "kl": 0.004946931964238205,
+      "K_Q": 0.021845172011711232,
+      "K_G": 1.0045073642544626
+    }
+  },
+  "leave_duration_out": {
+    "mean baseline": {
+      "rmse": 1699.6472487346662,
+      "rmse_interval": [
+        948.3974502113823,
+        2290.0156866671846
+      ],
+      "mape": 50.40820339411675,
+      "beats_baseline_fraction": null,
+      "predicted_range": [
+        1196.080732358889,
+        1196.080732358889
+      ]
+    },
+    "M0": {
+      "rmse": 2815.7215252519823,
+      "rmse_interval": [
+        1990.730716762431,
+        3502.1434908524852
+      ],
+      "mape": 126.22394934866665,
+      "beats_baseline_fraction": 0.0705,
+      "predicted_range": [
+        549.0872229281831,
+        7105.124140449484
+      ]
+    },
+    "M1": {
+      "rmse": 1514.7089001678276,
+      "rmse_interval": [
+        1090.8975624112418,
+        1879.0461903633152
+      ],
+      "mape": 61.112607028843755,
+      "beats_baseline_fraction": 0.6755,
+      "predicted_range": [
+        524.2308809724457,
+        4505.408543982733
+      ]
+    },
+    "M2": {
+      "rmse": 721.1809261931444,
+      "rmse_interval": [
+        454.0929874589562,
+        929.2081861235914
+      ],
+      "mape": 19.88398370321396,
+      "beats_baseline_fraction": 1.0,
+      "predicted_range": [
+        561.1575005400039,
+        3431.715868259498
+      ]
+    },
+    "M3": {
+      "rmse": 754.7811036281983,
+      "rmse_interval": [
+        451.48743465273856,
+        978.1258237339998
+      ],
+      "mape": 19.48931266195278,
+      "beats_baseline_fraction": 1.0,
+      "predicted_range": [
+        487.2876200074629,
+        3448.2233369034325
+      ]
+    },
+    "PLS": {
+      "rmse": 1478.4125309060412,
+      "rmse_interval": [
+        1097.6222666156732,
+        1775.9045879190485
+      ],
+      "mape": 66.52952010272955,
+      "beats_baseline_fraction": 0.655,
+      "predicted_range": [
+        537.4732738620407,
+        4217.898785235246
+      ],
+      "selected_inside_fold": "8 components"
+    },
+    "gradient boosting": {
+      "rmse": 954.5811815348427,
+      "rmse_interval": [
+        666.6948353717665,
+        1260.341100221119
+      ],
+      "mape": 36.328156627498096,
+      "beats_baseline_fraction": 0.9855,
+      "predicted_range": [
+        730.3006459495372,
+        2911.9943239401323
+      ],
+      "selected_inside_fold": "200 iterations, min leaf 5"
+    }
+  },
+  "profiles": {
+    "kl": {
+      "unit": "1/day",
+      "fitted": 0.004946931964238205,
+      "interval": [
+        0.003594581640464046,
+        0.008724109523340825
+      ],
+      "identified": true,
+      "relative_rise": 0.734871943513246
+    },
+    "K_Q": {
+      "unit": "mM",
+      "fitted": 0.021845172011711232,
+      "interval": [
+        0.011262736247053477,
+        0.03692772310134508
+      ],
+      "identified": true,
+      "relative_rise": 2.014510687826361
+    },
+    "K_G": {
+      "unit": "mM",
+      "fitted": 1.0045073642544626,
+      "interval": [
+        0.6394688420655332,
+        1.5658221311787932
+      ],
+      "identified": true,
+      "relative_rise": 1.3191777586203721
+    }
+  },
+  "bootstrap": {
+    "alpha": {
+      "point": 16.61599085647233,
+      "median": 17.39480619633198,
+      "interval": [
+        11.853176719918762,
+        23.136415766743934
+      ]
+    },
+    "beta": {
+      "point": 14.049561476007018,
+      "median": 13.933370184606297,
+      "interval": [
+        11.306312706943446,
+        15.878111362538219
+      ]
+    },
+    "kl": {
+      "point": 0.004946931964238205,
+      "median": 0.004974898287406718,
+      "interval": [
+        0.0032984647430507556,
+        0.007498942093324558
+      ]
+    },
+    "K_Q": {
+      "point": 0.021845172011711232,
+      "median": 0.019910753947239977,
+      "interval": [
+        0.01,
+        0.08684680675824609
+      ]
+    },
+    "K_G": {
+      "point": 1.0045073642544626,
+      "median": 0.993276847436354,
+      "interval": [
+        0.32251225460220956,
+        3.026650554636669
+      ]
+    }
+  },
+  "parameter_correlation": {
+    "names": [
+      "alpha",
+      "beta",
+      "kl",
+      "K_Q",
+      "K_G"
+    ],
+    "matrix": [
+      [
+        1.0,
+        -0.5933129188657369,
+        0.25708557354407074,
+        0.18744490198776062,
+        0.6188885752763946
+      ],
+      [
+        -0.5933129188657369,
+        1.0,
+        0.3521155083744707,
+        -0.04399952935100766,
+        0.04791284550560602
+      ],
+      [
+        0.2570855735440707,
+        0.3521155083744707,
+        1.0,
+        0.19316004216804353,
+        0.26754011984046994
+      ],
+      [
+        0.18744490198776065,
+        -0.043999529351007656,
+        0.19316004216804353,
+        0.9999999999999999,
+        -0.18715002765777033
+      ],
+      [
+        0.6188885752763947,
+        0.04791284550560602,
+        0.26754011984046994,
+        -0.18715002765777033,
+        1.0
+      ]
+    ]
+  },
+  "prediction_intervals": {
+    "parameter_only_width": 225.76190919749766,
+    "full_width": 859.7539545145482,
+    "residual_share_percent": 73.74110255474523,
+    "coverage_all_runs": 0.93,
+    "coverage_long_runs": 0.9
+  },
+  "mechanism_stability": {
+    "glucose_limitation": 0.8,
+    "glutamine_limitation": 0.56,
+    "metabolic_burden": 0.08,
+    "lysate_inhibition": 0.08,
+    "temperature_response": 0.6,
+    "ph_response": 0.56
+  }
+}

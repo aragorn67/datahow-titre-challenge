@@ -9,10 +9,16 @@ Four variants, differing only in **where** the environmental factor is applied a
 whether growth is counted as net or effective. That is a testable claim, not an assertion,
 so all four are fitted and compared rather than one being asserted:
 
-    M0   qP = alpha*mu_net + beta          P = alpha*dXv        + beta*gammaX
-    M1   qP = alpha*mu_eff + beta          P = alpha*dC         + beta*gammaX
-    M2   qP = alpha*mu_eff + beta*F        P = alpha*dC         + beta*sum_j F_j gX_j
-    M3   qP = (alpha*mu_eff + beta)*F      P = sum_j F_j*[alpha*dC_j + beta*gX_j]
+    M0   qP = alpha*mu_net + beta          P = alpha*dXv  + beta*gammaX
+    M1   qP = alpha*mu_eff + beta          P = alpha*dC   + beta*gammaX
+    M2   qP = alpha*mu_eff + beta*F        P = alpha*dC   + beta*INT F*Xv dt
+    M3   qP = (alpha*mu_eff + beta)*F      P = alpha*sum_j Fbar_j dC_j + beta*INT F*Xv dt
+
+where ``INT F*Xv dt`` is accumulated as a trapezoid of the product ``F*Xv`` and ``Fbar_j``
+is the interval average of ``F``, which is the only weight an endpoint difference like
+``dC_j`` admits. Both quadratures are defined once in ``features.py``; the vectorised search
+below re-derives them from the same pointwise factor rather than approximating them, so the
+objective being minimised is exactly the quantity :func:`design_columns` predicts with.
 
 M0 is the documented failure, kept as a benchmark so the difference between net and
 effective growth is *demonstrated* rather than claimed: it previously fitted alpha = -9.9,
@@ -61,7 +67,7 @@ MAPE. Which to ship is a decision made on cross-validated error, not here.
 
 import itertools
 import json
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
@@ -70,20 +76,29 @@ import numpy as np
 from numpy.typing import NDArray
 
 from titre_predictor import features, kinetics
+from titre_predictor.data import schema
 from titre_predictor.domain import ExperimentRun
 
 # Search range for the lysis rate constant, in reciprocal days. Spans four decades around
 # the value the data imply, so the optimum is interior rather than pinned at an edge.
 LYSIS_RATE_SPEC = kinetics.ParameterSpec("kl", "1/day", 1e-4, 1e1)
 
-# Grid points per shape constant per sweep. Deliberately modest: the refinement passes below
-# resolve the optimum far more cheaply than one dense sweep would, and the number of
-# combinations grows as this raised to the number of shape constants.
-DEFAULT_GRID_POINTS = 9  # 5 | 9 | 13
-
-# Narrowing passes after the first sweep. One sweep alone resolves each constant only to its
-# grid spacing, leaving a residual that the collinear coefficients then absorb.
-DEFAULT_SEARCH_REFINEMENTS = 4  # 0 (single sweep) | 2 | 4 | 6
+# Grid points per shape constant per sweep, and narrowing passes after the first sweep.
+#
+# The combination count grows as GRID_POINTS raised to the number of shape constants, so a
+# coarse sweep with many refinements dominates a dense sweep with few. Measured on the 90
+# training runs with six shape constants: (9 points, 4 refinements) takes 64.6 s and
+# (5, 8) takes 3.1 s, for a residual sum of squares identical to five significant figures.
+#
+# The speed is not a convenience. Screening fits one model per mechanism combination per
+# fold, so at a minute per fit there is pressure to trim combinations or folds -- exactly
+# the wrong economy when the purpose of that stage is honest selection.
+#
+# Convergence is checked rather than assumed: against a much denser sweep (21 points, 6
+# refinements) these settings agree on the residual sum of squares to 0.000% across M1, M3
+# with one mechanism, and M3 with three.
+DEFAULT_GRID_POINTS = 5  # 5 | 9 | 13
+DEFAULT_SEARCH_REFINEMENTS = 8  # 0 (single sweep) | 4 | 8 | 12
 
 # Combinations evaluated per batch. Bounds peak memory at roughly
 # chunk * runs * timepoints floats regardless of how large the grid is.
@@ -187,6 +202,15 @@ class FitDiagnostics:
     training_run_count: int
     shape_constant_names: tuple[str, ...]
     shape_constant_values: tuple[float, ...]
+    pinned_parameters: tuple[str, ...] = ()
+    """Shape constants resting on an edge of their search range.
+
+    A parameter at its bound is not an estimate -- the data wanted to go further and the
+    grid stopped it -- so it must be either widened or reported as a bound rather than
+    quoted as a fitted value. Two cases look identical here and are told apart by widening:
+    a range set too narrow, and a mechanism the fit is switching off by sending its
+    constant to infinity, which is a legitimate answer meaning 'this factor does nothing'.
+    """
 
 
 @dataclass(frozen=True)
@@ -205,6 +229,7 @@ class LuedekingPiretModel:
     mechanisms: tuple[str, ...] = ()
     mechanism_parameters: tuple[float, ...] = ()
     loss: Loss = "absolute"
+    ridge_penalty: float = 0.0
 
     def _columns(self, run: ExperimentRun) -> tuple[float, float]:
         quantities = features.run_quantities(run)
@@ -273,6 +298,7 @@ class LuedekingPiretModel:
             "mechanisms": list(self.mechanisms),
             "mechanism_parameters": list(self.mechanism_parameters),
             "loss": self.loss,
+            "ridge_penalty": self.ridge_penalty,
         }
 
     @classmethod
@@ -302,12 +328,24 @@ class LuedekingPiretModel:
             mechanisms=mechanisms,
             mechanism_parameters=parameters,
             loss=payload.get("loss", "absolute"),
+            ridge_penalty=float(payload.get("ridge_penalty", 0.0)),
         )
 
-    def save(self, artefact_path: Path) -> None:
-        """Write the model to a JSON file, creating parent directories as needed."""
+    def save(self, artefact_path: Path, provenance: Mapping[str, Any] | None = None) -> None:
+        """Write the model to a JSON file, creating parent directories as needed.
+
+        Args:
+            artefact_path: where to write.
+            provenance: optional record of how the model was produced -- data hash, seed,
+                package versions, timestamp. Stored alongside the parameters so a served
+                prediction can be traced back to the run that produced it, and ignored by
+                :meth:`from_dict`, which reads only the fields it needs.
+        """
+        payload = self.to_dict()
+        if provenance is not None:
+            payload["provenance"] = dict(provenance)
         artefact_path.parent.mkdir(parents=True, exist_ok=True)
-        artefact_path.write_text(json.dumps(self.to_dict(), indent=2), encoding="utf-8")
+        artefact_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
     @classmethod
     def load(cls, artefact_path: Path) -> "LuedekingPiretModel":
@@ -334,26 +372,24 @@ def design_columns(
     non_growth = np.empty(len(quantities), dtype=np.float64)
 
     for index, item in enumerate(quantities):
-        factor = (
-            features.interval_factor(mechanisms, item, parameters)
-            if variant.needs_factor
-            else np.ones_like(item.interval_cell_days)
-        )
         per_interval_growth = (
             item.interval_growth(lysis_rate_constant)
             if variant.uses_effective_growth
             else item.interval_viable_change
         )
-        growth[index] = float(
-            np.sum(factor * per_interval_growth)
-            if variant.factor_on_growth
-            else np.sum(per_interval_growth)
-        )
-        non_growth[index] = float(
-            np.sum(factor * item.interval_cell_days)
-            if variant.factor_on_non_growth
-            else np.sum(item.interval_cell_days)
-        )
+        if variant.factor_on_growth:
+            factor = features.interval_factor(mechanisms, item, parameters)
+            growth[index] = float(np.sum(factor * per_interval_growth))
+        else:
+            growth[index] = float(np.sum(per_interval_growth))
+
+        if variant.factor_on_non_growth:
+            # Trapezoidal in the product F*Xv, not the product of separate averages.
+            non_growth[index] = float(
+                np.sum(features.interval_weighted_cell_days(mechanisms, item, parameters))
+            )
+        else:
+            non_growth[index] = float(np.sum(item.interval_cell_days))
     return growth, non_growth
 
 
@@ -370,6 +406,8 @@ class _Padded:
     viable_change: NDArray[np.float64]  # (runs, intervals)
     growth_base: NDArray[np.float64]  # (runs, intervals)
     lysate_slope_change: NDArray[np.float64]  # (runs, intervals)
+    interval_length: NDArray[np.float64]  # (runs, intervals) -- zero where padded
+    viable_density: NDArray[np.float64]  # (runs, points)
     state: dict[str, NDArray[np.float64]]  # (runs, points)
 
 
@@ -382,6 +420,7 @@ def _pad(quantities: Sequence[features.RunQuantities]) -> _Padded:
     viable_change = np.zeros((run_count, intervals), dtype=np.float64)
     growth_base = np.zeros((run_count, intervals), dtype=np.float64)
     slope_change = np.zeros((run_count, intervals), dtype=np.float64)
+    interval_length = np.zeros((run_count, intervals), dtype=np.float64)
 
     series_names = sorted(quantities[0].state)
     state = {name: np.zeros((run_count, points), dtype=np.float64) for name in series_names}
@@ -392,12 +431,23 @@ def _pad(quantities: Sequence[features.RunQuantities]) -> _Padded:
         viable_change[index, :width] = item.interval_viable_change
         growth_base[index, :width] = item.interval_growth_base
         slope_change[index, :width] = item.interval_lysate_slope_change
+        # Padded intervals get zero length, so whatever the state pads to contributes nothing
+        # to a quadrature regardless of the factor evaluated there.
+        interval_length[index, :width] = np.diff(item.timestamps)
         for name in series_names:
             values = item.state[name]
             state[name][index, : values.size] = values
             state[name][index, values.size :] = values[-1]
 
-    return _Padded(cell_days, viable_change, growth_base, slope_change, state)
+    return _Padded(
+        cell_days,
+        viable_change,
+        growth_base,
+        slope_change,
+        interval_length,
+        state[schema.OBSERVATION_VIABLE_CELL_DENSITY],
+        state,
+    )
 
 
 def _mechanism_factor_tables(
@@ -411,9 +461,16 @@ def _mechanism_factor_tables(
     *own* grid and multiplying lookups costs a small fraction of evaluating the whole
     product once per combination of every mechanism's parameters.
 
+    The tables hold **pointwise** factors, and the quadrature is applied only after the
+    product across mechanisms has been formed. Averaging each mechanism over the interval
+    first and then multiplying would compute a product of means, which for more than one
+    mechanism is not the mean of the product: this search would then be minimising a
+    different quantity from the one :func:`design_columns` predicts with, and the fitted
+    coefficients would not belong to the model that serves them.
+
     Returns:
         ``(tables, sub_grids)`` where ``tables[m]`` has shape
-        ``(sub_grid_points, runs, intervals)`` and holds the interval-averaged factor.
+        ``(sub_grid_points, runs, points)``.
     """
     tables: list[NDArray[np.float64]] = []
     sub_grids: list[NDArray[np.float64]] = []
@@ -424,12 +481,11 @@ def _mechanism_factor_tables(
             list(itertools.product(*grids[offset : offset + count])), dtype=np.float64
         )
         table = np.empty(
-            (combinations.shape[0], padded.cell_days.shape[0], padded.cell_days.shape[1]),
+            (combinations.shape[0], *padded.viable_density.shape),
             dtype=np.float64,
         )
         for row, values in enumerate(combinations):
-            pointwise = mechanism.evaluate(padded.state, list(values))
-            table[row] = 0.5 * (pointwise[:, :-1] + pointwise[:, 1:])
+            table[row] = mechanism.evaluate(padded.state, list(values))
         tables.append(table)
         sub_grids.append(combinations)
         offset += count
@@ -441,18 +497,39 @@ def _solve(
     non_growth: NDArray[np.float64],
     targets: NDArray[np.float64],
     weights: NDArray[np.float64],
+    ridge_penalty: float = 0.0,
 ) -> tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]]:
-    """Weighted 2x2 least squares at every candidate at once.
+    """Weighted 2x2 ridge least squares at every candidate at once.
+
+    **The columns are standardised before the penalty is applied.** ``alpha`` multiplies
+    cells synthesised and ``beta`` multiplies cell-days, quantities differing by an order of
+    magnitude and carrying different units, so an unstandardised penalty would shrink them
+    unequally by an accident of scale. Concretely, on this data the unpenalised fit already
+    has the smaller raw norm of the two ends of the ridge, so a naive penalty would push
+    *away* from the better-extrapolating end rather than towards it.
+
+    With columns scaled to unit weighted mean square, the cross term becomes the weighted
+    correlation between the regressors, and ``ridge_penalty`` is a dimensionless multiple of
+    the total weight -- so the same value means the same amount of shrinkage regardless of
+    the run count, the loss, or the units of titre.
+
+    A penalty of exactly zero recovers ordinary least squares, so it must remain in the
+    search grid: the fit has to be able to decline shrinkage rather than be obliged to
+    accept it.
 
     Args:
         growth: ``(candidates, runs)``.
         non_growth: ``(candidates, runs)``.
         targets: ``(runs,)``.
         weights: ``(runs,)``.
+        ridge_penalty: shrinkage on the standardised coefficients. Zero is plain OLS.
 
     Returns:
-        ``(alpha, beta, residual_sum_of_squares)``, each ``(candidates,)``. Singular
-        candidates carry an infinite residual so they lose the comparison.
+        ``(alpha, beta, objective)``, each ``(candidates,)``. The objective is the penalised
+        weighted sum of squares, which is what the shape constants are chosen to minimise --
+        selecting them on the unpenalised residual while the coefficients are shrunk would
+        optimise two different criteria against each other. Singular candidates carry an
+        infinite objective so they lose the comparison.
     """
     weighted_growth = growth * weights
     weighted_non_growth = non_growth * weights
@@ -463,17 +540,46 @@ def _solve(
     growth_target = weighted_growth @ targets
     non_growth_target = weighted_non_growth @ targets
 
-    determinant = growth_squared * non_growth_squared - cross**2
-    usable = np.abs(determinant) > SINGULAR_DETERMINANT_TOLERANCE
+    total_weight = float(np.sum(weights))
+    positive = (growth_squared > 0.0) & (non_growth_squared > 0.0)
+    growth_scale = np.sqrt(np.where(positive, growth_squared, 1.0) / total_weight)
+    non_growth_scale = np.sqrt(np.where(positive, non_growth_squared, 1.0) / total_weight)
+
+    # Normal equations in standardised coordinates, where both diagonal entries are the
+    # total weight and the off-diagonal is the weighted correlation times that weight.
+    penalty = ridge_penalty * total_weight
+    diagonal = total_weight + penalty
+    standardised_cross = cross / (growth_scale * non_growth_scale)
+    standardised_growth_target = growth_target / growth_scale
+    standardised_non_growth_target = non_growth_target / non_growth_scale
+
+    determinant = diagonal**2 - standardised_cross**2
+    usable = positive & (np.abs(determinant) > SINGULAR_DETERMINANT_TOLERANCE)
     safe = np.where(usable, determinant, 1.0)
 
-    alpha = (non_growth_squared * growth_target - cross * non_growth_target) / safe
-    beta = (growth_squared * non_growth_target - cross * growth_target) / safe
+    standardised_alpha = (
+        diagonal * standardised_growth_target - standardised_cross * standardised_non_growth_target
+    ) / safe
+    standardised_beta = (
+        diagonal * standardised_non_growth_target - standardised_cross * standardised_growth_target
+    ) / safe
 
+    alpha = standardised_alpha / growth_scale
+    beta = standardised_beta / non_growth_scale
+
+    # Residual computed directly: with a penalty the fit is no longer a projection, so the
+    # usual "total minus explained" shortcut does not hold.
     total = float(np.sum(weights * targets**2))
-    residual = total - (alpha * growth_target + beta * non_growth_target)
-    residual = np.where(usable, np.maximum(residual, 0.0), np.inf)
-    return alpha, beta, residual
+    residual = (
+        total
+        - 2.0 * (alpha * growth_target + beta * non_growth_target)
+        + alpha**2 * growth_squared
+        + 2.0 * alpha * beta * cross
+        + beta**2 * non_growth_squared
+    )
+    objective = residual + penalty * (standardised_alpha**2 + standardised_beta**2)
+    objective = np.where(usable, np.maximum(objective, 0.0), np.inf)
+    return alpha, beta, objective
 
 
 def fit(
@@ -482,6 +588,8 @@ def fit(
     variant_name: str = "M3",
     mechanism_names: Sequence[str] = (),
     loss: Loss = "absolute",
+    ridge_penalty: float = 0.0,
+    fixed_shape_constants: Mapping[str, float] | None = None,
     grid_points: int = DEFAULT_GRID_POINTS,  # 5 | 9 | 13
     search_refinements: int = DEFAULT_SEARCH_REFINEMENTS,  # 0 | 2 | 4 | 6
     chunk_size: int = DEFAULT_CHUNK_SIZE,
@@ -551,23 +659,53 @@ def fit(
         specs.append(LYSIS_RATE_SPEC)
     specs.extend(kinetics.parameter_specs(mechanisms))
 
-    bounds = [(spec.minimum, spec.maximum) for spec in specs]
+    # A pinned constant keeps its place in the parameter vector but is given a
+    # single-point grid, so the search optimises everything else *around* it. That is what
+    # makes a profile a profile rather than a slice: the remaining parameters are free to
+    # compensate, which is the honest test of whether the pinned one is determined.
+    pinned = dict(fixed_shape_constants or {})
+    unknown = sorted(set(pinned) - {spec.name for spec in specs})
+    if unknown:
+        raise KeyError(
+            f"cannot fix {unknown}: not a shape constant of {variant.name} with mechanisms "
+            f"{list(mechanism_names)}; available: {[spec.name for spec in specs]}"
+        )
+
+    bounds = [
+        (pinned[spec.name], pinned[spec.name])
+        if spec.name in pinned
+        else (spec.minimum, spec.maximum)
+        for spec in specs
+    ]
     best_shape: tuple[float, ...] = ()
     best = (np.inf, 0.0, 0.0)  # residual, alpha, beta
 
     for _sweep in range(search_refinements + 1):
         grids = [
-            _grid_between(spec, low, high, grid_points)
+            np.array([pinned[spec.name]], dtype=np.float64)
+            if spec.name in pinned
+            else _grid_between(spec, low, high, grid_points)
             for spec, (low, high) in zip(specs, bounds, strict=True)
         ]
         candidate = _search(
-            variant, padded, mechanisms, specs, grids, target_vector, weights, chunk_size
+            variant,
+            padded,
+            mechanisms,
+            specs,
+            grids,
+            target_vector,
+            weights,
+            chunk_size,
+            ridge_penalty,
         )
         if candidate[0] < best[0]:
             best = candidate[:3]
             best_shape = candidate[3]
-        bounds = [_bracket(grid, value) for grid, value in zip(grids, best_shape, strict=True)]
-        if not specs:
+        bounds = [
+            (pinned[spec.name], pinned[spec.name]) if spec.name in pinned else _bracket(grid, value)
+            for spec, grid, value in zip(specs, grids, best_shape, strict=True)
+        ]
+        if not specs or len(pinned) == len(specs):
             break
 
     residual, alpha, beta = best
@@ -582,6 +720,7 @@ def fit(
         mechanisms=tuple(mechanism_names) if variant.needs_factor else (),
         mechanism_parameters=mechanism_values,
         loss=loss,
+        ridge_penalty=ridge_penalty,
     )
     growth, non_growth = design_columns(
         variant, quantities, lysis_rate, mechanisms, mechanism_values
@@ -620,6 +759,7 @@ def _search(
     targets: NDArray[np.float64],
     weights: NDArray[np.float64],
     chunk_size: int,
+    ridge_penalty: float = 0.0,
 ) -> tuple[float, float, float, tuple[float, ...]]:
     """One exhaustive sweep of the shape-constant grid.
 
@@ -642,14 +782,15 @@ def _search(
         lysis_values = lysis_grid[block[:, 0]]
 
         if variant.needs_factor and tables:
-            factor = np.ones(
-                (block.shape[0], padded.cell_days.shape[0], padded.cell_days.shape[1]),
-                dtype=np.float64,
+            # Pointwise across mechanisms first; the quadratures below then take the
+            # trapezoid of the finished product, matching features.py exactly.
+            pointwise_factor = np.ones(
+                (block.shape[0], *padded.viable_density.shape), dtype=np.float64
             )
             for position, table in enumerate(tables):
-                factor = factor * table[block[:, position + 1]]
+                pointwise_factor = pointwise_factor * table[block[:, position + 1]]
         else:
-            factor = None
+            pointwise_factor = None
 
         if variant.uses_effective_growth:
             per_interval_growth = (
@@ -659,21 +800,28 @@ def _search(
         else:
             per_interval_growth = padded.viable_change[None, :, :]
 
-        if variant.factor_on_growth and factor is not None:
-            growth = np.sum(factor * per_interval_growth, axis=2)
+        if variant.factor_on_growth and pointwise_factor is not None:
+            # dC_j is an endpoint difference, so the interval average of F is its weight.
+            interval_factor = 0.5 * (pointwise_factor[:, :, :-1] + pointwise_factor[:, :, 1:])
+            growth = np.sum(interval_factor * per_interval_growth, axis=2)
         else:
             growth = np.sum(per_interval_growth, axis=2)
             if growth.shape[0] == 1 and block.shape[0] > 1:
                 growth = np.repeat(growth, block.shape[0], axis=0)
 
-        if variant.factor_on_non_growth and factor is not None:
-            non_growth = np.sum(factor * padded.cell_days[None, :, :], axis=2)
+        if variant.factor_on_non_growth and pointwise_factor is not None:
+            # INT F*Xv dt, trapezoidal in the product rather than in each average.
+            product = pointwise_factor * padded.viable_density[None, :, :]
+            non_growth = np.sum(
+                0.5 * (product[:, :, :-1] + product[:, :, 1:]) * padded.interval_length[None, :, :],
+                axis=2,
+            )
         else:
             non_growth = np.repeat(
                 np.sum(padded.cell_days, axis=1)[None, :], block.shape[0], axis=0
             )
 
-        alpha, beta, residual = _solve(growth, non_growth, targets, weights)
+        alpha, beta, residual = _solve(growth, non_growth, targets, weights, ridge_penalty)
         position = int(np.argmin(residual))
         if float(residual[position]) < best[0]:
             shape: list[float] = []
@@ -720,6 +868,12 @@ def _diagnostics(
     else:
         correlation = float("nan")
 
+    pinned = tuple(
+        spec.name
+        for spec, value in zip(specs, shape_values, strict=True)
+        if _is_at_bound(spec, float(value))
+    )
+
     return FitDiagnostics(
         alpha_standard_error=float(np.sqrt(alpha_variance)),
         beta_standard_error=float(np.sqrt(beta_variance)),
@@ -729,6 +883,22 @@ def _diagnostics(
         training_run_count=run_count,
         shape_constant_names=tuple(spec.name for spec in specs),
         shape_constant_values=tuple(float(value) for value in shape_values),
+        pinned_parameters=pinned,
+    )
+
+
+def _is_at_bound(spec: kinetics.ParameterSpec, value: float, tolerance: float = 1e-6) -> bool:
+    """Whether a fitted constant is sitting on an edge of its search range."""
+    span = spec.maximum - spec.minimum
+    if spec.logarithmic:
+        span = np.log10(spec.maximum) - np.log10(spec.minimum)
+        return bool(
+            abs(np.log10(value) - np.log10(spec.minimum)) <= tolerance * span
+            or abs(np.log10(value) - np.log10(spec.maximum)) <= tolerance * span
+        )
+    return bool(
+        abs(value - spec.minimum) <= tolerance * span
+        or abs(value - spec.maximum) <= tolerance * span
     )
 
 

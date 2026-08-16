@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "titre-predictor"
 version = "0.1.0"
-description = "Final mAb titre prediction for a simulated CHO fed-batch bioprocess"
+description = "Final mAb titre prediction for a simulated fed-batch bioprocess"
 requires-python = ">=3.11"
 
 # Part 1 only. The inference-service dependencies (fastapi, pydantic, uvicorn,
@@ -52,9 +52,9 @@ select = [
 packages = ["titre_predictor"]
 mypy_path = "src"
 strict = true
-# pandas and scipy ship incomplete stubs; do not fail on their internals.
+# pandas, scipy and scikit-learn ship no py.typed marker; do not fail on their internals.
 [[tool.mypy.overrides]]
-module = ["pandas.*", "scipy.*"]
+module = ["pandas.*", "scipy.*", "sklearn.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

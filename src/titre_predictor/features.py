@@ -31,6 +31,19 @@ so that ``sum_j dC_j = Delta(Xv+Xd+Xl)`` and ``sum_j gX_j = gammaX`` exactly. Th
 identities are what make M2 nest M1 and M3 nest both, and they are asserted in the tests
 rather than assumed.
 
+The environmental factor enters those two quantities differently, and the distinction is not
+cosmetic. ``dC_j`` is an **endpoint difference**, so the only weight the data support is the
+interval average of ``F``. The non-growth term is an **integral against the cell curve**, so
+its integrand is the product ``F*Xv`` and the trapezoid must be taken of that product:
+
+    interval average of F      -> (F_j + F_{j+1})/2                     weights dC_j
+    INT F*Xv dt over interval  -> (F_j*Xv_j + F_{j+1}*Xv_{j+1})/2 * dt_j
+
+Averaging ``F`` and ``Xv`` separately and multiplying is a product of means where a mean of
+products is wanted; the two differ by ``dF*dXv/4`` per interval. Both forms live here as
+:func:`interval_factor` and :func:`interval_weighted_cell_days` so that neither the fitting
+code nor the service can pick the wrong one by accident.
+
 Why ``Xl(t)`` is fitted rather than differenced
 ------------------------------------------------
 M1 and M2 need ``Xd`` only at harvest; M3 needs ``Xl'(t)`` at every timepoint. Rather than
@@ -473,10 +486,16 @@ def interval_factor(
 ) -> NDArray[np.float64]:
     """``F_j``: the environmental factor averaged across each interval.
 
-    The contribution to ``INT F*Xv dt`` is trapezoidal in the **product**, so the factor is
-    averaged between the interval's endpoints rather than evaluated at a midpoint state.
-    This matters because ``F`` is nonlinear -- ``F(mean z) != mean F(z)`` -- and metabolites
-    move sharply within a day once feeding starts.
+    This is the weight for a quantity that is already an **endpoint difference** -- the
+    growth contribution ``dC_j`` -- where there is no integrand to weight pointwise and the
+    interval average is all the data support. The factor is averaged between the interval's
+    endpoints rather than evaluated at a midpoint state, because ``F`` is nonlinear
+    (``F(mean z) != mean F(z)``) and metabolites move sharply within a day once feeding
+    starts.
+
+    For the non-growth term, which *is* an integral against the cell curve, the factor must
+    not be averaged separately from ``Xv``. That is
+    :func:`interval_weighted_cell_days`.
 
     With no mechanisms in force this returns all ones, so the weighted sums reduce exactly to
     the plain trapezoid. That is what makes the M1/M2/M3 nesting exact rather than
@@ -489,6 +508,40 @@ def interval_factor(
     """
     pointwise = kinetics.environmental_factor(mechanisms, quantities.state, parameters)
     return np.asarray(0.5 * (pointwise[:-1] + pointwise[1:]), dtype=np.float64)
+
+
+def interval_weighted_cell_days(
+    mechanisms: Sequence[kinetics.Mechanism],
+    quantities: RunQuantities,
+    parameters: Sequence[float],
+) -> NDArray[np.float64]:
+    """``INT F*Xv dt`` over each interval, trapezoidal in the **product** ``F*Xv``.
+
+    The integrand of the non-growth term is the product, so the trapezoid must be taken of
+    the product:
+
+        (F_j*Xv_j + F_{j+1}*Xv_{j+1})/2 * dt_j
+
+    and **not** ``mean(F_j) * mean(Xv_j) * dt_j``, which is a product of means. The two
+    differ by ``dF*dXv/4`` per interval, and the error is systematic rather than random in
+    the regime the model is about -- ``F`` falling while ``Xv`` rises -- because the
+    neglected term carries the sign of ``dF*dXv``. Measured against the supplied runs the
+    product-of-means form is wrong by a median of only -0.07%, but by up to +7% on
+    individual runs, and being wrong in a knowable direction is a different defect from
+    being wrong by a small amount.
+
+    With no mechanisms in force ``F == 1`` and this returns
+    :func:`interval_cell_days` exactly, so M2 and M3 still nest M1 exactly.
+
+    Args:
+        mechanisms: the factors in force, from :func:`titre_predictor.kinetics.resolve`.
+        quantities: the reduction of one run.
+        parameters: shape constants, concatenated in mechanism order.
+    """
+    pointwise = kinetics.environmental_factor(mechanisms, quantities.state, parameters)
+    product = pointwise * quantities.state[schema.OBSERVATION_VIABLE_CELL_DENSITY]
+    trapezoid = 0.5 * (product[:-1] + product[1:]) * np.diff(quantities.timestamps)
+    return np.asarray(trapezoid, dtype=np.float64)
 
 
 # --- screening features --------------------------------------------------------------

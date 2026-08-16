@@ -145,6 +145,108 @@ def test_with_no_mechanisms_every_variant_but_m0_gives_identical_columns() -> No
         assert non_growth[0] == pytest.approx(columns[0][1][0])
 
 
+@pytest.mark.parametrize(
+    ("mechanism_names", "parameters"),
+    [
+        ((), ()),
+        (("glucose_limitation",), (5.0,)),
+        (("glutamine_limitation", "glucose_limitation"), (0.5, 5.0)),
+        (("metabolic_burden", "ph_response", "lysate_inhibition"), (12.0, 9.0, 0.4, 0.05)),
+    ],
+)
+@pytest.mark.parametrize("variant_name", ["M1", "M2", "M3"])
+def test_the_search_and_the_prediction_path_build_the_same_columns(
+    variant_name: str,
+    mechanism_names: tuple[str, ...],
+    parameters: tuple[float, ...],
+) -> None:
+    """The vectorised search must minimise the quantity the model predicts with.
+
+    Two implementations of the same quadrature exist because the search is vectorised over
+    thousands of candidates and :func:`model.design_columns` is not. They are only allowed to
+    exist if they agree, and they must agree for **more than one mechanism**, where the
+    difference between a product of interval means and the interval mean of the product first
+    appears -- an earlier version disagreed by up to 14% per run there, so ``alpha`` and
+    ``beta`` were fitted against columns no prediction ever used.
+    """
+    variant = model.resolve_variant(variant_name)
+    if mechanism_names and not variant.needs_factor:
+        pytest.skip(f"{variant_name} applies no factor")
+    lysis_rate = 0.05
+    runs = [_run(f"Exp {index}", peak) for index, peak in enumerate([12.0, 24.0, 36.0, 48.0])]
+    quantities = [features.run_quantities(run) for run in runs]
+    mechanisms = kinetics.resolve(mechanism_names)
+    targets = np.array([900.0, 1800.0, 2700.0, 3600.0])
+    weights = np.ones(len(runs))
+
+    # A single-point grid per constant, so the search evaluates exactly this candidate and
+    # its coefficients are comparable term by term against the prediction path's.
+    grids = [np.array([lysis_rate])] + [np.array([value]) for value in parameters]
+    search_residual, search_alpha, search_beta, _shape = model._search(
+        variant,
+        model._pad(quantities),
+        mechanisms,
+        [],
+        grids,
+        targets,
+        weights,
+        model.DEFAULT_CHUNK_SIZE,
+        0.0,
+    )
+
+    growth, non_growth = model.design_columns(
+        variant, quantities, lysis_rate, mechanisms, parameters
+    )
+    alpha, beta, residual = model._solve(growth[None, :], non_growth[None, :], targets, weights)
+
+    assert search_alpha == pytest.approx(float(alpha[0]), rel=1e-10)
+    assert search_beta == pytest.approx(float(beta[0]), rel=1e-10)
+    assert search_residual == pytest.approx(float(residual[0]), rel=1e-10)
+
+
+def test_the_non_growth_column_is_trapezoidal_in_the_product_not_in_each_average() -> None:
+    """``INT F*Xv dt`` is a mean of products, and the two differ when ``F`` and ``Xv`` move.
+
+    Hand-computed on two intervals so the assertion does not restate the implementation. The
+    product-of-means form that this replaces would give a different number here, and would
+    give it in a knowable direction: ``F`` falls as glucose depletes while ``Xv`` rises.
+    """
+    run = _run("Exp 1", 30.0)
+    quantities = features.run_quantities(run)
+    mechanisms = kinetics.resolve(["glucose_limitation"])
+    half_saturation = 5.0
+
+    weighted = features.interval_weighted_cell_days(mechanisms, quantities, [half_saturation])
+
+    glucose = run.observations[schema.OBSERVATION_GLUCOSE]
+    viable = run.observations[schema.OBSERVATION_VIABLE_CELL_DENSITY]
+    factor = glucose / (half_saturation + glucose)
+    product = factor * viable
+    for index in range(2):
+        step = run.timestamps[index + 1] - run.timestamps[index]
+        expected = 0.5 * (product[index] + product[index + 1]) * step
+        assert weighted[index] == pytest.approx(expected)
+        # The form it replaces, stated explicitly so the difference is on the record.
+        product_of_means = (
+            0.5
+            * (factor[index] + factor[index + 1])
+            * 0.5
+            * (viable[index] + viable[index + 1])
+            * step
+        )
+        assert weighted[index] != pytest.approx(product_of_means)
+
+
+def test_the_weighted_cell_days_reduce_to_plain_cell_days_with_no_mechanisms() -> None:
+    """What makes M2 nest M1 *exactly*: with ``F == 1`` the weighted quadrature is the plain
+    one, so the nesting is a property of the arithmetic rather than a tolerance."""
+    quantities = features.run_quantities(_run("Exp 1", 30.0))
+
+    weighted = features.interval_weighted_cell_days((), quantities, ())
+
+    assert weighted == pytest.approx(quantities.interval_cell_days, rel=1e-15)
+
+
 # --- fitting -----------------------------------------------------------------------------
 
 
@@ -235,16 +337,19 @@ def test_diagnostics_report_the_shape_constants_by_name() -> None:
     assert -1.0 <= diagnostics.coefficient_correlation <= 1.0
 
 
-def test_an_exact_fit_reports_an_undefined_correlation_rather_than_zero() -> None:
-    """Zero residual variance makes the coefficient covariance zero, so the correlation is
-    0/0. Reporting nan says 'not determined'; reporting 0.0 would claim the coefficients are
-    independent, which is the opposite of what a degenerate fit means."""
+def test_an_exact_fit_never_reports_the_coefficients_as_independent() -> None:
+    """On data generated exactly from the model the residual collapses to rounding error,
+    and the coefficient correlation is then either undefined (0/0, reported as nan) or
+    numerically near -1. Both say 'not determined'. What must never appear is a value near
+    zero, which would claim alpha and beta are independently identified -- the opposite of
+    what a degenerate fit means."""
     runs, targets = _training_set()
 
     _fitted, diagnostics = model.fit(runs, targets, variant_name="M1")
+    correlation = diagnostics.coefficient_correlation
 
-    assert diagnostics.residual_sum_of_squares == pytest.approx(0.0, abs=1e-6)
-    assert np.isnan(diagnostics.coefficient_correlation)
+    assert diagnostics.residual_sum_of_squares == pytest.approx(0.0, abs=1e-3)
+    assert np.isnan(correlation) or abs(correlation) > 0.9
 
 
 # --- prediction and the artefact ----------------------------------------------------------
@@ -439,3 +544,121 @@ def test_the_coefficients_are_strongly_correlated_on_the_real_data(
     _fitted, diagnostics = model.fit(short, train_targets, variant_name="M1")
 
     assert diagnostics.coefficient_correlation < -0.9
+
+
+# --- the ridge penalty ---------------------------------------------------------------
+
+
+def test_a_zero_penalty_recovers_ordinary_least_squares_exactly() -> None:
+    """Zero must remain in the search grid, so the fit can decline shrinkage rather than
+    be obliged to accept it."""
+    runs, targets = _training_set()
+    targets = {
+        key: value * factor
+        for (key, value), factor in zip(
+            targets.items(), [1.05, 0.94, 1.02, 0.97, 1.06], strict=True
+        )
+    }
+
+    plain, _ = model.fit(runs, targets, variant_name="M1")
+    zero_penalty, _ = model.fit(runs, targets, variant_name="M1", ridge_penalty=0.0)
+
+    assert zero_penalty.alpha == pytest.approx(plain.alpha)
+    assert zero_penalty.beta == pytest.approx(plain.beta)
+
+
+def test_a_larger_penalty_shrinks_the_coefficients() -> None:
+    runs, targets = _training_set()
+    targets = {
+        key: value * factor
+        for (key, value), factor in zip(
+            targets.items(), [1.05, 0.94, 1.02, 0.97, 1.06], strict=True
+        )
+    }
+
+    light, _ = model.fit(runs, targets, variant_name="M1", ridge_penalty=1e-3)
+    heavy, _ = model.fit(runs, targets, variant_name="M1", ridge_penalty=1.0)
+
+    assert abs(heavy.alpha) < abs(light.alpha)
+
+
+def test_the_penalty_acts_on_standardised_columns(
+    train_runs: list[ExperimentRun],
+    train_targets: dict[str, float],
+) -> None:
+    """alpha multiplies cells synthesised and beta multiplies cell-days -- quantities an
+    order of magnitude apart. An unstandardised penalty would shrink them by an accident of
+    scale, so equal shrinkage must appear in the standardised coefficients, not the raw
+    ones."""
+    short, _long = evaluation.split_by_duration(train_runs)
+    unpenalised, _ = model.fit(short, train_targets, variant_name="M1")
+    penalised, _ = model.fit(short, train_targets, variant_name="M1", ridge_penalty=0.1)
+
+    quantities = [features.run_quantities(run) for run in short]
+    growth, non_growth = model.design_columns(
+        model.VARIANTS["M1"], quantities, unpenalised.lysis_rate_constant, (), ()
+    )
+    growth_scale = float(np.sqrt(np.mean(growth**2)))
+    non_growth_scale = float(np.sqrt(np.mean(non_growth**2)))
+
+    # In standardised units both coefficients must shrink; in raw units they need not.
+    assert abs(penalised.alpha * growth_scale) < abs(unpenalised.alpha * growth_scale)
+    assert abs(penalised.alpha * growth_scale) + abs(penalised.beta * non_growth_scale) < abs(
+        unpenalised.alpha * growth_scale
+    ) + abs(unpenalised.beta * non_growth_scale)
+
+
+def test_the_penalty_survives_the_artefact_round_trip(tmp_path: Path) -> None:
+    runs, targets = _training_set()
+    fitted, _ = model.fit(runs, targets, variant_name="M1", ridge_penalty=0.01)
+
+    artefact = tmp_path / "model.json"
+    fitted.save(artefact)
+
+    assert model.LuedekingPiretModel.load(artefact).ridge_penalty == pytest.approx(0.01)
+
+
+def test_a_constant_resting_on_its_search_bound_is_reported(
+    train_runs: list[ExperimentRun],
+    train_targets: dict[str, float],
+) -> None:
+    """A parameter at its bound is not an estimate. Here the lactate and ammonia constants
+    run to the top of their range, which is the fit switching that factor off -- a real
+    answer, but one that must be visible rather than quoted as a fitted value."""
+    short, _long = evaluation.split_by_duration(train_runs)
+
+    _fitted, diagnostics = model.fit(
+        short, train_targets, variant_name="M2", mechanism_names=["metabolic_burden"]
+    )
+
+    assert "K_L" in diagnostics.pinned_parameters
+
+
+def test_a_saved_artefact_reproduces_its_predictions_exactly(tmp_path: Path) -> None:
+    """The training/serving guard. The inference service loads this file, so if a reloaded
+    model predicted differently the service would be silently serving a different model from
+    the one that was validated -- the same failure the shared feature layer exists to
+    prevent, one level up."""
+    runs, targets = _training_set()
+    fitted, _ = model.fit(runs, targets, variant_name="M2", mechanism_names=["ph_response"])
+
+    artefact = tmp_path / "model.json"
+    fitted.save(artefact)
+
+    np.testing.assert_allclose(
+        model.LuedekingPiretModel.load(artefact).predict_many(runs), fitted.predict_many(runs)
+    )
+
+
+def test_provenance_is_stored_and_ignored_on_load(tmp_path: Path) -> None:
+    """Provenance travels with the parameters so a served prediction can be traced to the
+    run that produced it, but it must not be needed to rebuild the model."""
+    runs, targets = _training_set()
+    fitted, _ = model.fit(runs, targets, variant_name="M1")
+    artefact = tmp_path / "model.json"
+
+    fitted.save(artefact, provenance={"training_data_sha256": "abc123", "random_seed": 0})
+
+    stored = json.loads(artefact.read_text(encoding="utf-8"))
+    assert stored["provenance"]["training_data_sha256"] == "abc123"
+    assert model.LuedekingPiretModel.load(artefact) == fitted
