@@ -5,16 +5,18 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "titre-predictor"
 version = "0.1.0"
-description = "Final mAb titre prediction for a simulated CHO fed-batch bioprocess"
+description = "Final mAb titre prediction for a simulated fed-batch bioprocess"
 requires-python = ">=3.11"
 
 # Part 1 only. The inference-service dependencies (fastapi, pydantic, uvicorn,
 # httpx) are deliberately NOT declared yet -- they are added in Part 2 so that
 # the modelling package can be installed and tested without a web stack.
 dependencies = [
-    "numpy>=1.24",
+    "numpy>=2.0",         # np.trapezoid; np.trapz was removed in 2.0
     "pandas>=1.5",
-    "scipy>=1.10",     # least_squares for the coefficient fit
+    "scipy>=1.10",       # nnls for the monotone lysate fit; BSpline for its basis
+    "scikit-learn>=1.3", # ElasticNetCV, PLSRegression, permutation_importance -- screening only
+    "matplotlib>=3.7",   # diagnostic plots
 ]
 
 [project.optional-dependencies]
@@ -44,13 +46,15 @@ select = [
 ]
 
 [tool.mypy]
-python_version = "3.11"
+# Deliberately not pinned to a python_version: mypy then checks against the
+# interpreter in use. Pinning it to 3.11 makes mypy parse numpy's stubs under 3.11
+# rules, and numpy >= 2.5 ships stubs using `type` statements that need 3.12+.
 packages = ["titre_predictor"]
 mypy_path = "src"
 strict = true
-# pandas and scipy ship incomplete stubs; do not fail on their internals.
+# pandas, scipy and scikit-learn ship no py.typed marker; do not fail on their internals.
 [[tool.mypy.overrides]]
-module = ["pandas.*", "scipy.*"]
+module = ["pandas.*", "scipy.*", "sklearn.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]
