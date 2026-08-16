@@ -107,6 +107,28 @@ class ModelDescription(BaseModel):
     training_data_sha256: str | None = None
 
 
+class ExtrapolationReport(BaseModel):
+    """Which inputs lie outside the range the model was fitted on.
+
+    Present on every successful prediction, and **not** omitted when everything is
+    in range: a caller should be able to read one field to know the answer rather
+    than infer it from a key's absence.
+
+    Args:
+        beyond_training_range: quantities outside the fitted range, by name.
+        detail: one human-readable line per exceedance, with the value and the
+            range it left.
+        checked: whether a comparison was possible at all. False when the artefact
+            carries no recorded ranges, in which case an empty
+            ``beyond_training_range`` means "not checked" rather than "all clear" --
+            a distinction worth stating rather than leaving to be assumed.
+    """
+
+    checked: bool
+    beyond_training_range: list[str] = Field(default_factory=list)
+    detail: list[str] = Field(default_factory=list)
+
+
 class PredictResponse(BaseModel):
     """A predicted final titre, and what produced it.
 
@@ -119,11 +141,15 @@ class PredictResponse(BaseModel):
         predicted_titer: final titre, in the units of the training targets.
         experiment_id: echoed from the request when supplied.
         model: what produced the number.
+        extrapolation: whether the request asked about conditions the model was
+            fitted on. Reported because this model exists to extrapolate and its
+            accuracy differs materially inside and outside the training range.
     """
 
     predicted_titer: float
     experiment_id: str | None = None
     model: ModelDescription
+    extrapolation: ExtrapolationReport
 
 
 class ErrorResponse(BaseModel):

@@ -16,9 +16,18 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, Response, status
+from fastapi import FastAPI, HTTPException, Response, status
 
+from titre_predictor.domain import InvalidExperimentRunError
+from titre_predictor.service import extrapolation
+from titre_predictor.service.dto import (
+    ExtrapolationReport,
+    ModelDescription,
+    PredictRequest,
+    PredictResponse,
+)
 from titre_predictor.service.state import ModelState, load_model_state
+from titre_predictor.service.translation import PayloadError, to_experiment_run
 
 SERVICE_TITLE = "Titre Prediction API"
 SERVICE_VERSION = "1.0.0"
@@ -94,6 +103,67 @@ def create_app(artefact_path: Path | None = None) -> FastAPI:
             },
             "provenance": state.provenance,
         }
+
+    @application.post(
+        "/predict",
+        response_model=PredictResponse,
+        summary="Run inference",
+        description=(
+            "Predicts the final titre from an experiment's observed trajectories. "
+            "Returns 400 with the offending variable named if the payload cannot be "
+            "used, and 503 if no model is loaded."
+        ),
+        responses={
+            400: {"description": "The payload cannot be turned into a run"},
+            503: {"description": "No model is loaded"},
+        },
+    )
+    def post_predict(request: PredictRequest) -> PredictResponse:
+        """Predict one experiment's final titre.
+
+        The whole body of this function is translate, predict, describe. That it is
+        short is the point: everything that could go wrong is handled by a layer
+        that is tested on its own, and there is no arithmetic here that could
+        disagree with the training pipeline's.
+        """
+        state: ModelState = application.state.model_state
+        if not state.is_ready:
+            # 503 rather than 500: the request is fine, the service is not, and the
+            # caller should retry elsewhere or later rather than change the payload.
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=state.error or "no model is loaded",
+            )
+        model = state.require_model()
+
+        try:
+            run = to_experiment_run(request, model)
+        except (PayloadError, InvalidExperimentRunError) as exception:
+            # 400, not 422: the payload parsed as JSON and matched the schema, so
+            # this is a semantic problem with the run rather than a malformed body.
+            # The message names the variable at fault, which is what the caller
+            # needs in order to fix it.
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail=str(exception)
+            ) from exception
+
+        exceedances = extrapolation.assess(run, model, state.training_ranges)
+        provenance = state.provenance or {}
+
+        return PredictResponse(
+            predicted_titer=model.predict(run),
+            experiment_id=request.experiment_id,
+            model=ModelDescription(
+                variant=model.variant,
+                mechanisms=list(model.mechanisms),
+                training_data_sha256=provenance.get("training_data_sha256"),
+            ),
+            extrapolation=ExtrapolationReport(
+                checked=state.training_ranges is not None,
+                beyond_training_range=[item.quantity for item in exceedances],
+                detail=[item.describe() for item in exceedances],
+            ),
+        )
 
     return application
 

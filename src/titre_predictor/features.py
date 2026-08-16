@@ -724,6 +724,62 @@ def run_features(
     return features
 
 
+def applicability_ranges(
+    runs: Sequence[ExperimentRun],
+) -> dict[str, tuple[float, float]]:
+    """The span of each quantity that decides whether a new run is inside the fitted range.
+
+    Recorded into the model artefact at training time and read by the inference service,
+    which cannot otherwise know what it was fitted on. Extrapolation is this model's whole
+    subject -- every test run is 14 days against mostly-shorter training runs -- so a
+    service unable to say "you are outside the range I was fitted on" withholds the thing
+    a user most needs.
+
+    **Which quantities, and why these.** Two are structural: ``cell_days`` is the dominant
+    extensive quantity and the one the data-driven benchmarks failed on, with eight of ten
+    held-out runs above the training maximum; ``duration_days`` is the axis of the shift
+    itself. The rest are the measured series, whose observed span is what the mechanism
+    constants were fitted against -- a half-saturation constant estimated over 0-44 mM
+    glucose is an extrapolation when applied at 200 mM, even though the Monod form stays
+    bounded and so cannot diverge.
+
+    A range is reported per series over **all** runs pooled, not per run: the question is
+    "has the model seen conditions like this?", not "is this run internally unusual".
+
+    Args:
+        runs: the training experiments.
+
+    Returns:
+        ``name -> (minimum, maximum)``. Series names keep their ``X:``/``W:`` prefix so
+        the service can match them against an incoming payload without a lookup table.
+
+    Raises:
+        ValueError: if no runs are given, since an empty range is not meaningful.
+    """
+    if not runs:
+        raise ValueError("need at least one run to measure applicability ranges")
+
+    quantities = [run_quantities(run) for run in runs]
+    ranges: dict[str, tuple[float, float]] = {
+        "cell_days": _span([item.cell_days for item in quantities]),
+        "duration_days": _span([run.duration_days for run in runs]),
+    }
+
+    # The reduction already carries each run's state, so it is reused rather than
+    # rebuilt: state_from_run merges two dicts per call and this runs over 100 runs.
+    states = [item.state for item in quantities]
+    for name in sorted({name for state in states for name in state}):
+        pooled = np.concatenate([state[name] for state in states if name in state])
+        ranges[name] = (float(np.min(pooled)), float(np.max(pooled)))
+
+    return ranges
+
+
+def _span(values: Sequence[float]) -> tuple[float, float]:
+    array = np.asarray(values, dtype=np.float64)
+    return (float(np.min(array)), float(np.max(array)))
+
+
 def feature_frame(
     runs: Sequence[ExperimentRun],
     phase_split_day: float = DEFAULT_PHASE_SPLIT_DAY,  # 5 | 6 | 7 | 8

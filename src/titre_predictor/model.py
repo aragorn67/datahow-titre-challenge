@@ -331,19 +331,37 @@ class LuedekingPiretModel:
             ridge_penalty=float(payload.get("ridge_penalty", 0.0)),
         )
 
-    def save(self, artefact_path: Path, provenance: Mapping[str, Any] | None = None) -> None:
+    def save(
+        self,
+        artefact_path: Path,
+        provenance: Mapping[str, Any] | None = None,
+        training_ranges: Mapping[str, Sequence[float]] | None = None,
+    ) -> None:
         """Write the model to a JSON file, creating parent directories as needed.
+
+        Both optional blocks are stored *alongside* the parameters rather than on the
+        model itself, and :meth:`from_dict` ignores both. Neither is needed to predict,
+        so neither belongs on an object whose job is to predict -- but both are needed
+        to interpret a prediction, which is the service's concern.
 
         Args:
             artefact_path: where to write.
-            provenance: optional record of how the model was produced -- data hash, seed,
-                package versions, timestamp. Stored alongside the parameters so a served
-                prediction can be traced back to the run that produced it, and ignored by
-                :meth:`from_dict`, which reads only the fields it needs.
+            provenance: how the model was produced -- data hash, seed, package versions,
+                timestamp -- so a served prediction can be traced to the run behind it.
+            training_ranges: ``name -> (minimum, maximum)`` over the training runs, for
+                quantities that determine whether a new run is inside the fitted range.
+                Recorded because **extrapolation is this model's whole subject**: the
+                task is to predict 14-day runs from mostly-shorter ones, and a service
+                that cannot say whether it is being asked to extrapolate is hiding the
+                one thing a user most needs to know.
         """
         payload = self.to_dict()
         if provenance is not None:
             payload["provenance"] = dict(provenance)
+        if training_ranges is not None:
+            payload["training_ranges"] = {
+                name: [float(low), float(high)] for name, (low, high) in training_ranges.items()
+            }
         artefact_path.parent.mkdir(parents=True, exist_ok=True)
         artefact_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 

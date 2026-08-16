@@ -63,12 +63,19 @@ class ModelState:
         provenance: the artefact's record of how it was produced. Surfaced by
             ``/health`` so it is possible to tell *which* model is serving --
             without it, "the service is up" says nothing about what it is serving.
+        training_ranges: the span of each quantity over the training runs, used to
+            tell a caller whether their request asks about conditions the model was
+            fitted on. ``None`` for an artefact produced before these were recorded,
+            which is still a usable model -- so the service serves it and reports
+            that the check could not be made, rather than refusing or implying a
+            clean result.
     """
 
     model: LuedekingPiretModel | None = None
     error: str | None = None
     artefact_path: Path | None = None
     provenance: dict[str, Any] | None = None
+    training_ranges: dict[str, list[float]] | None = None
 
     @property
     def is_ready(self) -> bool:
@@ -131,24 +138,45 @@ def load_model_state(artefact_path: Path | None = None) -> ModelState:
             artefact_path=path,
         )
 
+    side_car = _read_side_car_blocks(path)
     return ModelState(
         model=model,
         artefact_path=path,
-        provenance=_read_provenance(path),
+        provenance=side_car.get("provenance"),
+        training_ranges=side_car.get("training_ranges"),
     )
 
 
-def _read_provenance(path: Path) -> dict[str, Any] | None:
-    """The artefact's provenance block, if it carries one.
+def _read_side_car_blocks(path: Path) -> dict[str, Any]:
+    """The artefact's ``provenance`` and ``training_ranges`` blocks, if present.
 
-    Read separately rather than through :meth:`LuedekingPiretModel.from_dict`,
-    which deliberately ignores it: provenance is not needed to predict, so the
-    model object has no business holding it. It is needed to *report* what is
-    serving, which is this module's concern.
+    Read separately rather than through :meth:`LuedekingPiretModel.from_dict`, which
+    deliberately ignores both: neither is needed to *predict*, so the model object
+    has no business holding them. Both are needed to *interpret* a prediction --
+    which model produced it, and whether it was asked about familiar conditions --
+    and that is this module's concern.
+
+    Missing blocks are not an error. An artefact from before either was recorded is
+    a perfectly good model, and the service degrades to serving without that
+    context rather than refusing.
     """
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):  # pragma: no cover - the model already loaded
-        return None
+        return {}
+
+    blocks: dict[str, Any] = {}
     provenance = payload.get("provenance")
-    return dict(provenance) if isinstance(provenance, dict) else None
+    if isinstance(provenance, dict):
+        blocks["provenance"] = dict(provenance)
+
+    ranges = payload.get("training_ranges")
+    if isinstance(ranges, dict):
+        # Kept only where the span is a usable pair; a malformed entry is dropped
+        # rather than allowed to raise later, inside a request.
+        blocks["training_ranges"] = {
+            name: [float(span[0]), float(span[1])]
+            for name, span in ranges.items()
+            if isinstance(span, (list, tuple)) and len(span) == 2
+        }
+    return blocks
