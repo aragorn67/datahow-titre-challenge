@@ -57,6 +57,7 @@ sys.path.insert(0, str(REPOSITORY_ROOT / "src"))
 from titre_predictor import (  # noqa: E402
     baselines,
     evaluation,
+    features,
     kinetics,
     model,
     screening,
@@ -726,7 +727,13 @@ def main(argv: list[str] | None = None) -> None:
     rule("ARTEFACTS")
     model_path = arguments.artefact_directory / "titre_model.json"
     report_path = arguments.artefact_directory / "training_report.json"
-    shipped.save(model_path, provenance=provenance)
+    # The applicability ranges travel with the model because the inference service
+    # cannot otherwise know what the model was fitted on -- and this model's whole
+    # subject is extrapolation, so "are you asking me about conditions I have seen?"
+    # is a question it must be able to answer.
+    ranges = features.applicability_ranges(runs)
+    shipped.save(model_path, provenance=provenance, training_ranges=ranges)
+    report["applicability_ranges"] = {name: list(span) for name, span in ranges.items()}
     report_path.parent.mkdir(parents=True, exist_ok=True)
     report_path.write_text(json.dumps(report, indent=2, default=float), encoding="utf-8")
 

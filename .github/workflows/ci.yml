@@ -1,0 +1,107 @@
+# Continuous integration: every check that must pass before a change is merged.
+#
+# The point is that these are the *same* commands run locally, not a parallel set
+# that can drift. If `ruff check .` passes on your machine it passes here, and if it
+# does not, CI is telling you something real rather than something about CI.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# A second push to the same branch cancels the first run still in progress. Without
+# this, pushing three times in a row queues three full runs and you wait for
+# results you no longer care about.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    name: Lint, types and tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install
+        run: pip install -e ".[dev]"
+
+      # Each check is its own step so a failure names itself in the UI. Combined
+      # into one step, a red X would only say "checks failed" and you would have to
+      # read the log to learn whether it was formatting or a broken test.
+      - name: Lint
+        run: ruff check .
+
+      - name: Format
+        run: ruff format --check .
+
+      - name: Types
+        run: mypy
+
+      # The artefact is committed, so the tests that load it run here rather than
+      # skipping. That matters: those are the tests covering the service, and a CI
+      # run that silently skipped them would be reporting a pass it had not earned.
+      - name: Tests
+        run: pytest -q
+
+  container:
+    name: Docker image builds and serves
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build
+        run: docker build -t titre-predictor .
+
+      # Building is not the same as working. The most common containerisation
+      # failure is an image that builds and then cannot start -- a missing file, a
+      # wrong path, a permission the non-root user does not have -- so the container
+      # is started and actually asked for a prediction.
+      - name: Start
+        run: docker run -d --name titre -p 8000:8000 titre-predictor
+
+      - name: Wait for readiness
+        run: |
+          for _ in $(seq 1 30); do
+            if curl -sf http://localhost:8000/health > /dev/null; then
+              echo "ready"; exit 0
+            fi
+            sleep 2
+          done
+          echo "service never became ready"; docker logs titre; exit 1
+
+      - name: Predict
+        run: |
+          python -m pip install --quiet pyyaml
+          python - <<'PY'
+          import json, urllib.request, yaml
+          spec = yaml.safe_load(open("inference_server_spec.yml", encoding="utf-8"))
+          example = spec["components"]["schemas"]["PredictRequest"]["properties"]
+          body = json.dumps({
+              "timestamps": example["timestamps"]["example"],
+              "values": example["values"]["example"],
+          }).encode()
+          request = urllib.request.Request(
+              "http://localhost:8000/predict",
+              data=body,
+              headers={"Content-Type": "application/json"},
+          )
+          payload = json.loads(urllib.request.urlopen(request).read())
+          titre = payload["predicted_titer"]
+          print(f"predicted_titer = {titre}")
+          # A sanity bound, not a regression test: the assertion that the served
+          # number equals the fitted one lives in the test suite, where it runs over
+          # all twenty test experiments. This only catches a container that starts
+          # and then returns nonsense.
+          assert 100.0 < titre < 20000.0, f"implausible prediction: {titre}"
+          PY
+
+      - name: Container logs on failure
+        if: failure()
+        run: docker logs titre

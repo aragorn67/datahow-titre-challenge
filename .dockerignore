@@ -1,0 +1,42 @@
+# Everything the image does not need. Two reasons this matters beyond image size:
+# the build context is uploaded to the Docker daemon before the build starts, so a
+# 400 MB .venv makes every build slow; and anything copied in is visible inside the
+# container, so excluding it is also about not shipping what was never meant to ship.
+
+# The local environment -- large, and platform-specific to Windows in any case.
+.venv/
+venv/
+
+# Version control and editor state.
+.git/
+.gitignore
+.github/
+.vscode/
+.idea/
+
+# Caches and build output.
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+build/
+dist/
+
+# Training-only material. The service loads a fitted artefact; it never reads the
+# CSVs, never re-fits, and has no use for the pipeline. Excluding data/ also keeps
+# the training set out of a distributed image, which is worth doing by default.
+data/
+scripts/
+tests/
+docs/
+
+# The training report is the pipeline's output, not the service's input. Only
+# artefacts/titre_model.json is copied in, explicitly, by the Dockerfile.
+artefacts/training_report.json
+
+# Notes and specifications that the running service does not consult.
+*.md
+!README.md
+inference_server_spec.yml
