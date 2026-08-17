@@ -152,6 +152,111 @@ Stated here rather than left to be found:
 - **The model cannot predict an unrun experiment** — it conditions on measured
   trajectories.
 
+## Part 2 — the inference service
+
+Two endpoints, per [`inference_server_spec.yml`](inference_server_spec.yml).
+
+```bash
+docker build -t titre-predictor .
+docker run --rm -p 8000:8000 titre-predictor
+curl http://localhost:8000/health
+```
+
+Interactive API documentation, generated from the code, is at
+`http://localhost:8000/docs`.
+
+### `GET /health`
+
+**Readiness, not liveness.** 200 only when a model is loaded and a prediction can
+actually be served; 503 with the reason otherwise.
+
+The distinction matters. A process can be perfectly alive and completely unable to
+serve — running, listening, no model loaded. A health check that returns 200
+unconditionally is *worse than none*, because an orchestrator believes it and routes
+traffic to a container that cannot answer.
+
+It also reports **which** model is serving — variant, mechanisms, and the artefact's
+provenance including the training-data hash. "The service is up" says nothing about
+whether the model behind it is the one that was validated.
+
+A failed load does **not** crash the process. Letting it die would be loud, but the
+reason would live only in container logs — and "no artefact at that path", "artefact
+from an incompatible build" and "corrupt file" are three problems with three different
+fixes. The service comes up and says which one it hit. Readiness keeps it out of the
+load balancer either way, so nothing degraded is served.
+
+### `POST /predict`
+
+Takes an experiment's trajectories, returns the predicted final titre:
+
+```json
+{
+  "predicted_titer": 3505.5192,
+  "experiment_id": null,
+  "model": {
+    "variant": "M2",
+    "mechanisms": ["glutamine_limitation", "glucose_limitation"],
+    "training_data_sha256": "09b9cf2c..."
+  },
+  "extrapolation": { "checked": true, "beyond_training_range": [], "detail": [] }
+}
+```
+
+The specification leaves the response schema to the implementer. This returns an
+**object** rather than a bare number so the contract can grow — a prediction interval
+is the obvious addition — without breaking callers.
+
+**The extrapolation report is the part worth explaining.** This model exists to
+extrapolate: every test run is 14 days against mostly-shorter training runs, and for
+eight of the ten held-out runs `cell_days` lies above the entire training range. A
+service that answers such a request with a bare number, indistinguishable from one it
+is confident about, withholds what the user most needs. So the artefact records the
+span of every quantity over the training runs, and each response says whether the
+request left it.
+
+It **warns rather than refuses**, for a concrete reason: refusing runs above the
+training maximum would refuse most of the runs the service exists to predict. The
+`checked` flag distinguishes "checked and clear" from "could not check".
+
+Status codes are chosen rather than defaulted:
+
+| situation | code |
+|---|---|
+| body does not match the schema | 422 |
+| body parses, run is unusable — missing series, wrong length, NaN | 400, naming the variable |
+| no model loaded | 503 |
+
+**Validation repairs only what can be repaired exactly.** Missing `W:` control
+profiles are reconstructed from the `Z:` scalars, which is legitimate because they are
+exact step functions of them, verified to machine precision on all 1290 supplied rows.
+Everything else is rejected: interpolating a missing observation would let the service
+return a confident number computed partly from invented data.
+
+**Which inputs are required comes from the loaded model**, not a hardcoded list.
+`X:VCD` and `X:Lysed` are structural; beyond that it is whatever the mechanisms read.
+The shipped model therefore requires `X:Glc` and `X:Gln` and does *not* require
+temperature or pH — and a model with a temperature term would require `W:temp` with no
+code change.
+
+### Deployment
+
+The fitted model is **baked into the image**, so it is a complete versioned unit:
+`docker run` serves predictions with no further setup, and the model that was validated
+is the model that ships. `TITRE_MODEL_PATH` stays configurable if you would rather
+mount one.
+
+The image installs `.[service]` only — numpy, scipy and the web stack — so it carries
+neither pandas nor scikit-learn, **174 MB of packages inference has no use for**. That
+split is enforced by a test, not a comment: `tests/test_dependencies.py` imports the
+prediction path in a subprocess and fails if the training stack appears.
+
+It runs as a **non-root user**, and `HEALTHCHECK` points at `/health` so the container
+reports `healthy` only once the model has loaded.
+
+Verified by building and running, not asserted: image 518 MB, container reports
+healthy, and `POST /predict` returns 3505.5192 for the specification's example —
+identical to the same prediction computed locally.
+
 ## Layout
 
 ```
@@ -159,10 +264,13 @@ docs/modelling.md          Part 1 in full: equations, assumptions, estimation,
                            evaluation, benchmarks, uncertainty, weaknesses
 docs/data-loading.md       the data layer: schema, loading, control reconstruction
 src/titre_predictor/       the package
+    service/               the inference service: DTOs, translation, endpoints
 scripts/screen_and_fit.py  the training pipeline; writes the artefacts
 artefacts/                 fitted model + machine-readable training report
 data/raw/                  the four supplied CSV files, unmodified
 inference_server_spec.yml  the OpenAPI contract for Part 2
+Dockerfile                 the service image
+.github/workflows/ci.yml   lint, types, tests, and a container smoke test
 ```
 
 Two documents, deliberately. Everything about the *model* — including the eight
@@ -188,11 +296,22 @@ Add the identifiability work — profiles, bootstrap, mechanism stability (~25 m
 python scripts/screen_and_fit.py --uncertainty
 ```
 
-Checks:
+Run the service locally, without Docker:
+
+```bash
+uvicorn titre_predictor.service.app:app --reload
+```
+
+Checks — the same four commands CI runs, so a local pass is a CI pass:
 
 ```bash
 pytest && ruff check . && ruff format --check . && mypy
 ```
+
+CI runs them on every push to `main` and every pull request, and separately builds
+the image, starts it and asks it for a prediction. Building is not the same as
+working: the commonest containerisation failure is an image that builds and then
+cannot start.
 
 **The deliverable is the artefacts, not the terminal output.** The pipeline writes
 `artefacts/titre_model.json` — which the Part 2 service loads — and
