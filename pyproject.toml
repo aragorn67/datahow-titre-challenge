@@ -6,7 +6,12 @@ build-backend = "setuptools.build_meta"
 name = "titre-predictor"
 version = "0.1.0"
 description = "Final mAb titre prediction for a simulated fed-batch bioprocess"
-requires-python = ">=3.11"
+# Narrowed from >=3.11 to what is actually verified. CI runs 3.13 and the container
+# pins 3.13, so 3.11 and 3.12 were a claim nothing tested -- and mypy cannot check
+# this code under 3.11 rules anyway, since numpy >= 2.5 ships stubs using `type`
+# statements that need 3.12+. Declaring support for an untested interpreter is the
+# same category of mistake as quoting a constant the data do not determine.
+requires-python = ">=3.13"
 
 # The base dependencies are exactly what is needed to LOAD A FITTED MODEL AND
 # PREDICT -- nothing more. Everything used only to *produce* the model lives in
@@ -56,7 +61,7 @@ where = ["src"]
 
 [tool.ruff]
 line-length = 100
-target-version = "py311"
+target-version = "py313"
 src = ["src", "tests", "scripts"]
 
 [tool.ruff.lint]
