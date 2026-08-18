@@ -15,11 +15,28 @@ a data-driven fit -- the benchmarks lose by 757 RMSE on exactly this shift -- bu
 
 Why it warns rather than refuses
 ---------------------------------
-Refusing would be defensible for a model asked far outside its range, and is the
-wrong choice here for a concrete reason: **the task's own test set is mostly out of
-range.** A service that rejected runs above the training maximum for ``cell_days``
-would refuse most of the runs it exists to predict. The warning carries the
-information without making the service useless.
+Refusing would be defensible for a model asked far outside its range. It is the wrong
+choice here for two reasons.
+
+The first is that **being outside the range does not make a prediction worthless.**
+The whole argument for a kinetic structure is that it degrades gracefully where a
+data-driven fit does not -- measured at 721 against 1478 for PLS on the duration
+shift. Refusing would throw away exactly the capability the model was chosen for, and
+would substitute the service's judgement for the caller's about whether a
+near-boundary answer is useful to them.
+
+The second is arithmetic. Against the shipped model, fitted on all 100 training runs,
+the supplied test set is **almost entirely inside** the recorded ranges: of the twenty
+test runs, none exceed the ``cell_days`` maximum of 548.7 and exactly one falls below
+the minimum of 20.1. A refusal rule would almost never fire, which is a poor reason to
+build one.
+
+**A caution against a tempting misreading.** The often-quoted "eight of ten runs above
+the training maximum" belongs to the *leave-duration-out validation*, where the model
+is deliberately fitted on the 90 short runs alone and the range stops at 242.7. In that
+harder setting 14 of these 20 test runs would be extrapolations. Both statements are
+true of different models, and confusing them overstates what the shipped service is
+being asked to do.
 
 What is compared
 ----------------

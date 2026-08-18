@@ -256,8 +256,10 @@ twenty-two entries.
 ### 4.6 `Xl(t)` is a smooth monotone cumulative pool, observed with additive noise clipped at zero
 
 - **Assumed:** monotonicity is a physical constraint on a cumulative pool, not a smoothing
-  convenience; and the ~7% noise on `X:Lysed` is additive rather than multiplicative, clipped at
-  zero (48% of early values are exactly 0.0).
+  convenience; and the noise on `X:Lysed` is **additive with a fixed absolute size** — sd of
+  order 0.009, against a series whose final value has median 0.056 — rather than proportional,
+  and clipped at zero. The clipping is visible: every day-0 value is exactly 0.0, as is roughly
+  half of days 1–2, and 32% of all rows.
 - **Alternative:** finite-difference the measured series directly.
 - **Why not:** raw levels make the interval growth contribution negative in roughly 21% of
   intervals, purely from noise. And the clipping biases observations *upward early and not late*,
