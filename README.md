@@ -29,6 +29,14 @@ on an exact one-day grid.
 Test targets are supplied at interview time, so the test set informs no modelling
 decision. All model selection is done on the training runs.
 
+**A note on committing the data.** The four CSVs are in `data/raw/` so the pipeline
+reproduces from a clone alone. That is right for a simulated dataset supplied for an
+exercise, and it is not what I would do with real process data: measured bioprocess
+runs belong outside version control — object storage or a data catalogue — with the
+repository holding only a reference and a hash. The provenance block in
+`artefacts/titre_model.json` already records a SHA-256 of the training data, which is
+the mechanism that would carry over unchanged.
+
 **The brief names no cell line** — "a simulated bioprocess for monoclonal antibody
 (mAb) production" — so none is assumed. That constraint is load-bearing rather than
 pedantic: the reference papers are CHO studies, and borrowing their organism would
@@ -317,10 +325,21 @@ cannot start.
 **The deliverable is the artefacts, not the terminal output.** The pipeline writes
 `artefacts/titre_model.json` — which the Part 2 service loads — and
 `artefacts/training_report.json`, holding every number above in machine-readable form.
-Both carry provenance: a hash of the training data, the seed, and package versions, so a
-served prediction can be traced to the run that produced it. Printing constants and
-expecting them to be copied into the service by hand is how a served model drifts from
-the model that was validated.
+Both carry provenance: a SHA-256 of the training data, the random seed, and package
+versions, so a served prediction can be traced to the run that produced it. Printing
+constants and expecting them to be copied into the service by hand is how a served model
+drifts from the model that was validated.
+
+**What the hash buys.** SHA-256 is a fingerprint for a file: any input produces a fixed
+64-character string, the same input always produces the same string, and changing a
+single character produces an entirely different one. It cannot be reversed, and it
+cannot be forged by editing the file.
+
+That makes one otherwise-awkward question answerable months later — *which data produced
+this model?* Recompute the hash of whatever CSV is to hand; if it matches the value in
+the artefact, it is byte-for-byte the file the model was fitted on. If it does not, the
+data has changed and the model no longer corresponds to it. Filenames and timestamps
+cannot establish that, because both can be identical while the contents differ.
 
 ## Challenges
 
