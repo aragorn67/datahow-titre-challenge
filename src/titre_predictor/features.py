@@ -57,9 +57,12 @@ The form is non-negative least squares on an integrated B-spline basis:
 
 B-splines are non-negative everywhere, so non-negative coefficients make the derivative
 non-negative **everywhere**, not merely at the knots. That is the whole reason for this
-construction: PCHIP is monotone but interpolates, so 7% noise would pass straight into
-``Xl'``; isotonic regression is monotone but piecewise constant, so its derivative is a
-train of spikes; an unconstrained smoothing spline smooths but can turn downwards. NNLS is
+construction: PCHIP is monotone but interpolates, so the noise would pass straight into
+``Xl'`` -- and because that noise is a fixed absolute size against a series starting at
+zero, the signal-to-noise ratio early in a run is near zero, which is exactly where the
+interpolation would be fitting nothing but noise; isotonic regression is monotone but
+piecewise constant, so its derivative is a train of spikes; an unconstrained smoothing
+spline smooths but can turn downwards. NNLS is
 convex with a finite active-set solution, so there is no starting guess and no local
 minimum -- the same estimation posture as the rest of the model.
 
@@ -88,7 +91,8 @@ exactly zero, hence ``Xd(T) = 0`` -- implausible physically, but the honest read
 lysate curve that is flat at the end relative to the noise floor.
 
 The intercept ``c_0`` is left free and non-negative. The noise on ``X:Lysed`` is clipped at
-zero -- 48% of early values are exactly 0.0 -- which biases the observations *upward* early
+zero -- every day-0 value is exactly 0.0, as is about half of days 1-2 and 32% of all rows --
+which biases the observations *upward* early
 and not late; forcing the curve through ``Xl(0) = 0`` would make it tilt to absorb that bias,
 corrupting the derivative, which is the quantity actually wanted. The intercept is harmless
 because every use of ``Xl`` here is via a difference, in which a constant offset cancels.
