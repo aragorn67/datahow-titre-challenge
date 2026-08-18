@@ -114,22 +114,16 @@ Three instruments, three jobs, never mixed:
 Every parameter is refitted inside every fold, `kl` included — reusing one fitted on all
 the data would leak held-out runs into every fold.
 
-Four decisions worth naming:
+Two further decisions worth naming — the other two, on screening and on
+identifiability, are covered under [Challenges](#challenges) below:
 
-- **Screening and mechanism selection are separate stages.** A variable screen ranks
-  variables; it cannot see whether the mechanism assigned to a variable can represent
-  the *sign* of its association. Lactate tops the screen at +0.767 with productivity,
-  and its inhibition term can only bend downwards — so the fit switches it off. Glucose
-  is dropped by the screen as collinear, and its Monod term does the work.
 - **Where `F` acts was tested, not assumed.** Four nested variants (M0–M3) differing only
   in whether growth is net or effective and where the factor applies. `F ≡ 1` makes M2
-  and M3 collapse onto M1 *exactly*, so the comparison is genuinely nested.
-- **A mechanism must be identifiable, not merely predictive.** One candidate cleared the
-  1% improvement bar and then failed to transfer; every fold had fitted its constant far
-  outside the measured concentration range, i.e. switched the mechanism off. Mechanisms
-  now need constants the folds agree on as well as a margin.
+  and M3 collapse onto M1 *exactly*, so the comparison is genuinely nested rather than a
+  comparison of three unrelated models.
 - **One margin governs every selection step** — mechanisms, variant, ridge — so the same
-  measurement is not read to two different precisions.
+  measurement is not read to two different precisions. An earlier version required 1% of
+  mechanisms while accepting a ridge penalty on 0.5%.
 
 ## Known limitations
 
@@ -207,16 +201,23 @@ The specification leaves the response schema to the implementer. This returns an
 is the obvious addition — without breaking callers.
 
 **The extrapolation report is the part worth explaining.** This model exists to
-extrapolate: every test run is 14 days against mostly-shorter training runs, and for
-eight of the ten held-out runs `cell_days` lies above the entire training range. A
-service that answers such a request with a bare number, indistinguishable from one it
-is confident about, withholds what the user most needs. So the artefact records the
-span of every quantity over the training runs, and each response says whether the
-request left it.
+extrapolate — every test run is 14 days against mostly-shorter training runs — so a
+service that answers with a bare number, indistinguishable from one it is confident
+about, withholds what the user most needs. The artefact records the span of every
+quantity over the training runs, and each response says whether the request left it.
 
-It **warns rather than refuses**, for a concrete reason: refusing runs above the
-training maximum would refuse most of the runs the service exists to predict. The
-`checked` flag distinguishes "checked and clear" from "could not check".
+It **warns rather than refuses**, because being outside the range does not make a
+prediction worthless: the case for a kinetic structure is precisely that it degrades
+gracefully where a data-driven fit does not, and refusing would discard the capability
+the model was chosen for. The `checked` flag distinguishes "checked and clear" from
+"could not check".
+
+One figure is easy to misread, so it is stated explicitly. Against the **shipped**
+model, fitted on all 100 runs, the supplied test set is almost entirely *inside* the
+recorded ranges — none of the twenty exceed the `cell_days` maximum and exactly one
+falls below the minimum. The "eight of ten above the training range" figure quoted in
+the modelling docs belongs to the **leave-duration-out validation**, a deliberately
+harder setting fitted on the 90 short runs alone. Both are true of different models.
 
 Status codes are chosen rather than defaulted:
 
@@ -321,15 +322,115 @@ served prediction can be traced to the run that produced it. Printing constants 
 expecting them to be copied into the service by hand is how a served model drifts from
 the model that was validated.
 
+## Challenges
+
+The five that shaped the design. `docs/modelling.md` carries the technical detail behind
+each.
+
+### Choosing what kind of model this should be
+
+The first decision, and the one everything else followed from. Three options, none
+obviously right:
+
+- **Purely statistical** — regress titre on run-level aggregates. Simple, and it treats a
+  14-day run as a point in feature space far from anything in training.
+- **Purely mechanistic** — a full bioreactor model, simulating growth, metabolism and
+  production forward from the design parameters. Principled, and it needs far more
+  parameters than 100 single-scalar observations can identify.
+- **Hybrid** — a mechanistic scaffold whose uncertain part is learned.
+
+*Resolved* to the third, for a reason specific to this dataset: **the `/predict` payload
+supplies the full measured trajectories.** The growth and metabolite equations of a
+forward model exist to *predict* those trajectories — and we are handed them. What
+survives that substitution is exactly the part no measurement pins down: specific
+productivity. So the model integrates a rate law along measured data and solves no
+differential equation at inference.
+
+That settled the scaffold and immediately raised the harder half — **what should the
+features be?** The rate law's *shape* comes from theory; which physiological effects
+modulate productivity does not. That is empirical, and it is where the difficulty moved
+(see the third challenge below).
+
+### The test set occupies a regime the training set barely reaches
+
+All 20 test runs last 14 days; only 10 of 100 training runs do. Biomaterial exposure
+tops out at 242.7 across runs of ≤10 days, and **14 of the 20 test runs exceed that**.
+Ammonia never sustains a decline in any run of ≤10 days — 0 of 90 — while 30% of 14-day
+runs show one. The short runs never enter the state the test runs end in.
+
+*Resolved structurally.* Rate equations integrate to any horizon, so a longer run
+accumulates more integral rather than landing in an unvisited part of feature space, and
+the saturating forms flatten outside the fitted range instead of diverging. The
+benchmarks confirm the argument rather than assert it: on the held-out ten, **721**
+against 1478 for PLS and 955 for gradient boosting.
+
+### The quantity the model needs is never measured
+
+Luedeking–Piret couples production to *biosynthesis*, so the growth term needs total
+cells synthesised — which requires the dead pool, and dead cells are not in the dataset.
+
+*Resolved by choosing between two published population structures.* Under the parallel
+form, lysed cells derive directly from viable cells and the measured lysate says nothing
+about the dead pool. Under the sequential form they derive *from* the dead pool, so
+`Xd = Xl'/kl` and the unmeasured quantity becomes readable from measured data up to one
+constant. I chose the parallel form first because it made the *lysis* parameters easy to
+identify — which optimised the wrong thing, since lysis parameters were never the
+difficulty.
+
+### A statistical criterion cannot see mechanism
+
+Having settled on a hybrid, the seam between its halves caused trouble twice.
+
+The variable screen's strongest result was **lactate**, correlating +0.767 with
+productivity. Its mechanism is an inhibition term, which only bends downwards — no
+parameter value expresses a positive association. Meanwhile glucose, dropped by the
+screen as collinear with lactate, mapped to a Monod term that bends upwards and did the
+actual work. *The screen discarded the mechanism that worked and kept the one that could
+not.*
+
+Later, a candidate mechanism improved cross-validated error by 3% while switched off:
+every one of the ten folds fitted its inhibition constant above 1000 mM against a lactate
+range of 0–8 mM, making the factor `1/(1 + 8/1000) = 0.992`.
+
+*Resolved* by separating screening from selection — screening reports which measurements
+carry information, mechanism selection is a separate step judged on prediction — and by
+requiring mechanisms to have **identifiable constants**, not merely a better score.
+
+### Rigour applied downstream of a biased choice feels like diligence
+
+A temperature term survived three careful checks: not pinned at a grid boundary, not a
+proxy for elapsed time (correlation 0.25), and not overfitting — training fit improved 5%
+while held-out error improved 15%, the opposite of the overfitting signature.
+
+Every one of those checks was downstream of a decision already made badly. **The 15%
+held-out improvement that made it persuasive had been measured on the same ten runs it
+was being selected against.**
+
+*Resolved* by moving all selection — mechanisms, variant, ridge strength — inside the 90
+short runs, and reading the ten 14-day runs exactly once, at the end. Under clean
+selection, temperature is not chosen.
+
 ## Assumptions
 
-Eight assumptions, each stated with the alternative it was chosen over and what breaks
-if it is wrong, in [`docs/modelling.md`](docs/modelling.md#4-assumptions).
+Each of these exists because something is **missing from the data**. They are the
+substitutions that made a modelling technique applicable at all — not preferences, and
+not conclusions. Where an assumption is wrong, the consequence is stated.
 
-The most consequential: **no bioreactor volume is supplied**, so dilution terms cannot
-be identified and feeds are treated as additive concentration source terms. Both
-reference papers carry `F/V` explicitly and we cannot.
+Full detail, with the alternative each was chosen over, in
+[`docs/modelling.md`](docs/modelling.md#4-assumptions).
 
-The one carrying the most risk: **that a mechanism helping on 7–10 day runs also helps
-at 14 days.** Every selection decision rests on it, and it is untestable at this sample
-size — isolating the 14-day runs returns to ten points and their noise.
+| missing | assumed | consequence if wrong |
+|---|---|---|
+| **Bioreactor volume.** No `V` column exists. | Feeds act as additive concentration source terms; dilution `F/V` is omitted from every balance. | Every concentration balance is biased, worst in the most-fed runs — and metabolite concentrations drive both surviving mechanisms. The most consequential assumption here. |
+| **Dead-cell measurement.** `Xv` and `Xl` are measured; `Xd` never is. | Lysis is *sequential* — lysed cells derive from the dead pool — so `Xd = Xl'/kl`, recoverable up to one constant. | The growth regressor is wrong, and it is used by every model variant. No fallback. |
+| **A data dictionary.** None is supplied, so `X:Lysed` units are undocumented. | It is a cumulative cell density in the same units as `X:VCD`. | `α` silently absorbs a unit conversion and stops meaning "titre per cell synthesised". Predictions survive; the mechanistic reading does not. |
+| **Any titre except at harvest.** One scalar per run, so `qP(t)` cannot be identified. | A rate-law *form* (Luedeking–Piret) holds; only its two coefficients are fitted. | The shape is wrong and no amount of data would reveal it, since there is nothing to compare a trajectory against. |
+| **14-day runs in quantity.** Only 10 of 100 reach the test horizon. | A mechanism that helps on 7–10 day runs also helps at 14 days. | Selection is optimising for the wrong regime. **Untestable at this sample size** — isolating the 14-day runs returns to ten points and their noise. The assumption carrying the most risk. |
+| **Sub-daily sampling.** Observations are one per day. | `F(z)` is roughly constant within a one-day interval. | Interval quadratures are biased, worst on feed-start days when metabolites move sharply within a day. |
+
+Two further assumptions are methodological rather than data-driven, and are documented
+with the code that relies on them: that `Xl(t)` is smooth and monotone (a physical
+constraint on a cumulative pool, which justifies fitting rather than differencing), and
+that the controlled variables are inputs rather than dynamic states (they reconstruct
+from the `Z:` scalars to machine precision, so modelling them would mean integrating
+quantities already known exactly).
