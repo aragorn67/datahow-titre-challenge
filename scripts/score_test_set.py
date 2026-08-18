@@ -186,9 +186,11 @@ def main(argv: list[str] | None = None) -> int:
         print("to explain. It will be reported once the real targets are supplied.")
 
     rule("PER EXPERIMENT")
-    print("The test set IS the extrapolation regime: every run is 14 days, and most")
-    print("exceed the training range on biomaterial exposure. Where the model is wrong,")
-    print("gammaX is the first thing to look at.\n")
+    print("Every test run is 14 days, so gammaX is the first thing to look at wherever")
+    print("the model is wrong. The shipped model saw 14-day runs in training, so its")
+    print("range is wide and most of these sit inside it -- the flag marks the")
+    print("exceptions, in both directions.")
+    print()
     training_ranges = _training_ranges(arguments.artefact)
     low_cell_days, high_cell_days = training_ranges.get("cell_days") or [
         -float("inf"),
